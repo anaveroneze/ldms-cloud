@@ -15,7 +15,7 @@ Added the following rules:
 | SSH | TCP | 10444 | 0.0.0.0/0 |
 | All | All | All | 0.0.0.0/0 |  
 
-Run: `./launch_instances.sh`  
+Run: [launch_instances.sh](launch_instances.sh)
 
 Check instances available:
 
@@ -222,7 +222,8 @@ MemFree       2263600 KB
 MemAvailable  3515044 KB  
 SwapTotal     0  
 SwapFree      0
- 
+
+To terminate all run [kill_instances.sh](kill_instances.sh)
 
 ---
 
