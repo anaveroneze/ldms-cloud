@@ -50,7 +50,7 @@ Optional, create an AWS AMI
 aws ec2 create-image --instance-id <INSTANCE_ID> --name "ldms-ami-$(date +%s)" --no-reboot
 ```
 
-## **Step 4: Configuration Files** 
+## **Step 3: Configuration Files** 
 
 To get each IP address:
 
@@ -131,7 +131,7 @@ updtr_prdcr_add name=all_sets regex=.*
 updtr_start name=all_sets 
 ``` 
 
-## **Step 5: Starting the Daemons** 
+## **Step 4: Starting the Daemons** 
 
 **Step 1: aggregator**
 
@@ -153,7 +153,7 @@ ldmsd -x sock:10444 -c samplerd-2.conf -l /tmp/sampler2.log -v INFO &
 
 Flag -m 1g sets memory allocation to 1GB (vs default 512MB). This was one of the key fixes suggested by Sara and the LDMS team to resolve the buffer overflow crash.
 
-## **Step 6: Verification** 
+## **Step 5: Verification** 
 
 ## **Process Check (node-3)**
 
