@@ -118,11 +118,7 @@ AGG_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=aggregator" \
     --document-name "AWS-RunShellScript" \
-    --parameters commands=["
-        source /home/ubuntu/set-ldms-env.sh,
-        aws s3 cp s3://$S3_BUCKET/$S3_PREFIX/agg.conf /home/ubuntu/agg.conf,
-        ldmsd -x sock:10444 -c /home/ubuntu/agg.conf -l /tmp/agg.log -v INFO -m 1g
-    "] \
+    --parameters 'commands=["bash -c \"source /home/ubuntu/set-ldms-env.sh && aws s3 cp s3://'$S3_BUCKET'/'$S3_PREFIX'/agg.conf /home/ubuntu/agg.conf && ldmsd -x sock:10444 -c /home/ubuntu/agg.conf -l /tmp/agg.log -v INFO -m 1g\""]' \
     --query 'Command.CommandId' \
     --output text)
 
@@ -144,12 +140,7 @@ CONN_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=connector" \
     --document-name "AWS-RunShellScript" \
-    --parameters commands=["
-        source /home/ubuntu/set-ldms-env.sh,
-        aws s3 cp s3://$S3_BUCKET/$S3_PREFIX/samplerd-\$(hostname).conf /home/ubuntu/samplerd.conf,
-        until ldms_ls -x sock -p 10444 -h $AGG_HOSTNAME &>/dev/null; do echo 'Waiting for aggregator...'; sleep 2; done,
-        ldmsd -x sock:10444 -c /home/ubuntu/samplerd.conf -l /tmp/sampler.log -v INFO
-    "] \
+    --parameters 'commands=["bash -c \"source /home/ubuntu/set-ldms-env.sh && aws s3 cp s3://'$S3_BUCKET'/'$S3_PREFIX'/samplerd-\\$(hostname).conf /home/ubuntu/samplerd.conf && until ldms_ls -x sock -p 10444 -h '$AGG_HOSTNAME' &>/dev/null; do echo Waiting for aggregator...; sleep 2; done && ldmsd -x sock:10444 -c /home/ubuntu/samplerd.conf -l /tmp/sampler.log -v INFO\""]' \
     --query 'Command.CommandId' \
     --output text)
 
@@ -167,14 +158,7 @@ VERIFY_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=aggregator" \
     --document-name "AWS-RunShellScript" \
-    --parameters commands=["
-        source /home/ubuntu/set-ldms-env.sh,
-        echo '=== LDMS Metric Sets ===',
-        ldms_ls -x sock -p 10444 -h localhost -v,
-        echo '',
-        echo '=== LDMSD Processes ===',
-        ps aux | grep ldmsd | grep -v grep
-    "] \
+    --parameters 'commands=["bash -c \"source /home/ubuntu/set-ldms-env.sh && echo '\"'\"'=== LDMS Metric Sets ==='\"'\"' && ldms_ls -x sock -p 10444 -h localhost -v && echo && echo '\"'\"'=== LDMSD Processes ==='\"'\"' && ps aux | grep ldmsd | grep -v grep\""]' \
     --query 'Command.CommandId' \
     --output text)
 
