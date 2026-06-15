@@ -28,8 +28,8 @@ aws s3 mb “s3://$BUCKET” --region us-east-1 2>/dev/null || echo “Bucket al
 
 # 3. Upload config files to S3
 aws s3 cp agg.conf “s3://$BUCKET/ldms/”
-aws s3 cp samplerd-1.conf “s3://$BUCKET/ldms/”
-aws s3 cp samplerd-2.conf “s3://$BUCKET/ldms/”
+aws s3 cp samplerd-connector1.conf “s3://$BUCKET/ldms/”
+aws s3 cp samplerd-connector2.conf “s3://$BUCKET/ldms/”
 
 # 4. Verify configs are in S3
 aws s3 ls “s3://$BUCKET/ldms/”
@@ -71,7 +71,7 @@ Same steps as CloudShell, but requires:
 - `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then connectors with readiness checks
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
-- `agg.conf`, `samplerd-1.conf`, `samplerd-2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
+- `agg.conf`, `samplerd-connector1.conf`, `samplerd-connector2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
 - `CLAUDE.md` — implementation guidance for Claude Code
 
 ## Detailed Workflow
@@ -105,8 +105,8 @@ Before running `start_cluster.sh`, ensure config files are in S3:
 
 BUCKET="ldms-telemetry"
 aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-1.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-2.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-connector1.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-connector2.conf s3://$BUCKET/ldms/
 ```
 
 **Important:** Replace `<AGG_IP>` placeholder in sampler configs with `aggregator.cluster.internal` (private DNS name).
@@ -179,11 +179,12 @@ This gracefully stops LDMS daemons via SSM before terminating instances.
 ## Configuration Files
 
 - **`agg.conf`** — aggregator configuration
-  - Listens for producers matching `connector.*` regex
+  - Listens for producers matching `samplerd.*` regex
   - Pulls metrics every 1s with 100ms offset
   - Stores CSV to `/home/ubuntu/ldms-csv`
 
-- **`samplerd-1.conf`, `samplerd-2.conf`** — sampler configurations
+- **`samplerd-connector1.conf`, `samplerd-connector2.conf`** — sampler configurations
+  - Named to match each node's hostname (`connector1`, `connector2`) so each node fetches `samplerd-$(hostname).conf`
   - Advertise to aggregator on port 10444
   - Collect meminfo metrics every 1s
   - Producer names must be unique and match aggregator's listener pattern
