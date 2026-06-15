@@ -189,6 +189,24 @@ Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fe
   - Advertises to the aggregator on port 10444 and collects meminfo every 1s
   - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`samplerd-1`, `samplerd-2`, …), so it stays `sampler.*` regardless of how many samplers you run
 
+## Scaling the Cluster
+
+The number of samplers is a single knob: **`NUM_SAMPLERS`** (default `2`), defined at the top of `launch_instances.sh` and overridable from the environment. Everything else adapts automatically — `launch_instances.sh` generates `samplerd-1 … samplerd-N`, and `start_cluster.sh`, `kill_instances.sh`, and `fetch_data.sh` all target nodes by the `LDMSRole` tag / security group rather than a fixed count.
+
+```bash
+# Launch a cluster with 5 samplers
+NUM_SAMPLERS=5 ./launch_instances.sh
+./start_cluster.sh
+```
+
+Or set the default permanently by editing `launch_instances.sh`:
+
+```bash
+NUM_SAMPLERS="${NUM_SAMPLERS:-2}"   # change 2 to your preferred default
+```
+
+Because all samplers share the single `sampler.conf` (each substitutes its own hostname into `__NODE__` at start), adding more samplers needs **no new config files and no code changes** — only the `NUM_SAMPLERS` value. After launch, `ldms_ls` on the aggregator will show one `samplerd-N/meminfo` set per sampler.
+
 ## Monitoring and Troubleshooting
 
 ### Check SSM Command Status
