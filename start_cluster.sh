@@ -173,12 +173,4 @@ aws ssm list-command-invocations \
     --details \
     --query 'CommandInvocations[*].[InstanceId,CommandPlugins[0].Output]' \
     --output text
-
-echo ""
-echo "=== LDMS Cluster Started Successfully ==="
-echo ""
-echo "Next steps:"
-echo "  - Fetch collected CSV data: ./fetch_data.sh"
-echo "  - Stop daemons only:        ./kill_instances.sh --stop"
-echo "  - Terminate all instances:  ./kill_instances.sh"
-echo ""
+ 
