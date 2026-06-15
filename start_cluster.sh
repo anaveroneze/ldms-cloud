@@ -7,10 +7,12 @@ SG_NAME="cluster-sg"
 S3_BUCKET="${S3_BUCKET:-ldms-telemetry}"
 S3_PREFIX="ldms"
 AGG_HOSTNAME="aggregator.cluster.internal"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
 
 # Helper function to get instances in the security group
 get_instances() {
     aws ec2 describe-instances \
+        --region "$REGION" \
         --filters "Name=instance-state-name,Values=running" \
                   "Name=group-name,Values=$SG_NAME" \
         --query 'Reservations[].Instances[].InstanceId' \
@@ -27,6 +29,7 @@ poll_command_status() {
 
     while [[ $elapsed -lt $max_wait ]]; do
         local status=$(aws ssm list-command-invocations \
+            --region "$REGION" \
             --command-id "$command_id" \
             --query 'CommandInvocations[0].Status' \
             --output text 2>/dev/null || echo "")
@@ -38,6 +41,7 @@ poll_command_status() {
             echo "✗ Command failed"
             # Display error output
             aws ssm list-command-invocations \
+                --region "$REGION" \
                 --command-id "$command_id" \
                 --details \
                 --query 'CommandInvocations[*].[InstanceId,Status,CommandPlugins[0].Output]' \
@@ -57,6 +61,7 @@ poll_command_status() {
 
 # Main script starts here
 echo "=== LDMS Cluster Startup ==="
+echo "Region: $REGION"
 echo "Security group: $SG_NAME"
 echo "S3 bucket: s3://$S3_BUCKET/$S3_PREFIX"
 
@@ -74,6 +79,7 @@ echo ""
 # Step 1: Run setup.sh on all instances via SSM
 echo "Step 1: Running setup.sh on all instances..."
 SETUP_CMD_ID=$(aws ssm send-command \
+    --region "$REGION" \
     --instance-ids $INSTANCES \
     --document-name "AWS-RunShellScript" \
     --parameters 'commands=["cd /tmp && curl -o setup.sh https://raw.githubusercontent.com/anaveroneze/ldms-cloud/main/setup.sh && bash setup.sh"]' \
@@ -91,6 +97,7 @@ echo ""
 # Step 2: Start the aggregator
 echo "Step 2: Starting aggregator..."
 AGG_CMD_ID=$(aws ssm send-command \
+    --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=aggregator" \
     --document-name "AWS-RunShellScript" \
     --parameters commands=["
@@ -116,6 +123,7 @@ sleep 5
 # Step 4: Start the connectors
 echo "Step 3: Starting connectors with readiness check..."
 CONN_CMD_ID=$(aws ssm send-command \
+    --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=connector" \
     --document-name "AWS-RunShellScript" \
     --parameters commands=["
@@ -138,6 +146,7 @@ echo ""
 # Step 5: Verify cluster is healthy
 echo "Step 4: Verifying cluster health..."
 VERIFY_CMD_ID=$(aws ssm send-command \
+    --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=aggregator" \
     --document-name "AWS-RunShellScript" \
     --parameters commands=["
