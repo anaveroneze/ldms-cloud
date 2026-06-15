@@ -12,32 +12,58 @@ This repository provides scripts and configurations to deploy a 3-node LDMS (Lig
 - AWS CloudShell (recommended) or local machine with AWS CLI
 - S3 bucket for storing config files (e.g., `ldms-telemetry`)
 
-**CloudShell Note:** CloudShell has 1 GB persistent storage in `$HOME` and resets after ~20 minutes of inactivity. Clone this repo and store configs in S3.
+### CloudShell Quick Start (Recommended)
 
-### Deployment Steps
+CloudShell is ideal for this workflow — no setup needed, IAM credentials pre-configured, no SSH keys.
 
 ```bash
-# 1. Clone repo (or cd into existing clone)
+# 1. Clone repo to $HOME (persists across inactivity resets)
+cd ~
 git clone https://github.com/anaveroneze/ldms-cloud.git
 cd ldms-cloud
 
-# 2. Upload config files to S3
+# 2. Create S3 bucket for config files (if it doesn't exist)
 BUCKET=”ldms-telemetry”
-aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-1.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-2.conf s3://$BUCKET/ldms/
+aws s3 mb “s3://$BUCKET” --region us-east-1 2>/dev/null || echo “Bucket already exists”
 
-# 3. Launch instances and start cluster
+# 3. Upload config files to S3
+aws s3 cp agg.conf “s3://$BUCKET/ldms/”
+aws s3 cp samplerd-1.conf “s3://$BUCKET/ldms/”
+aws s3 cp samplerd-2.conf “s3://$BUCKET/ldms/”
+
+# 4. Verify configs are in S3
+aws s3 ls “s3://$BUCKET/ldms/”
+
+# 5. Launch instances (creates VPC, security group, DNS, IAM role)
 ./launch_instances.sh
+# Takes ~3-5 minutes, shows instance details
+
+# 6. Start cluster (setup + daemon startup)
 ./start_cluster.sh
+# Takes ~10-15 minutes (15min for LDMS compile, ~2min for daemons)
 
-# 4. Monitor progress via SSM
-aws ssm list-command-invocations --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' --output table
+# 7. Monitor deployment
+aws ssm list-command-invocations \
+  --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' \
+  --output table
 
-# 5. Stop daemons or terminate (see below)
+# 8. When done, stop daemons or terminate
 ./kill_instances.sh --stop    # Stop daemons only
-./kill_instances.sh           # Stop daemons and terminate instances
+./kill_instances.sh           # Terminate instances
 ```
+
+**If CloudShell times out (inactivity):**
+```bash
+# Just reconnect and resume
+cd ~/ldms-cloud
+aws ssm list-command-invocations --query '...' --output table
+```
+
+### Local Machine Deployment
+
+Same steps as CloudShell, but requires:
+- `aws configure` with your credentials
+- SSH key available if you need manual access (`~/.ssh/ana.pem`)
 
 ## Repository Contents
 
@@ -161,6 +187,70 @@ This gracefully stops LDMS daemons via SSM before terminating instances.
   - Advertise to aggregator on port 10444
   - Collect meminfo metrics every 1s
   - Producer names must be unique and match aggregator's listener pattern
+
+## Monitoring and Troubleshooting
+
+### Check SSM Command Status
+
+```bash
+# Show all commands (latest first)
+aws ssm list-command-invocations \
+  --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' \
+  --output table | head -20
+
+# Show detailed output of a specific command
+aws ssm list-command-invocations \
+  --command-id <COMMAND_ID> \
+  --details \
+  --query 'CommandInvocations[*].[InstanceId,Status,CommandPlugins[0].Output]' \
+  --output text
+```
+
+### Check Instance Status
+
+```bash
+# Show all cluster instances
+aws ec2 describe-instances \
+  --filters "Name=tag:LDMSRole,Values=aggregator,connector" Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].[Tags[?Key==`Name`]|[0].Value,State.Name,PrivateIpAddress,PublicIpAddress]' \
+  --output table
+```
+
+### Query LDMS Metrics (Once Cluster is Running)
+
+```bash
+# Get aggregator private IP
+AGG_IP=$(aws ec2 describe-instances \
+  --filters "Name=tag:LDMSRole,Values=aggregator" \
+  --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+  --output text)
+
+# Query metric sets (requires ldms_ls from your local machine, or SSH to aggregator)
+ldms_ls -x sock -p 10444 -h "$AGG_IP" -v
+```
+
+### Tail Logs (Via SSM)
+
+```bash
+# Check aggregator log
+aws ssm send-command \
+  --targets "Key=tag:LDMSRole,Values=aggregator" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["tail -50 /tmp/agg.log"]'
+
+# Check connector logs
+aws ssm send-command \
+  --targets "Key=tag:LDMSRole,Values=connector" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["tail -50 /tmp/sampler.log"]'
+```
+
+### Common Issues
+
+- **"No running instances found"** → Check `./launch_instances.sh` completed successfully
+- **"Command failed" in SSM** → Instance may not have IAM permissions; verify `ldms-cluster-role` was created
+- **"S3 access denied"** → Check S3 bucket exists and config files uploaded to `s3://ldms-telemetry/ldms/`
+- **LDMS daemons won't start** → Check setup.sh succeeded (see SSM logs); OVIS build can take 10+ minutes
 
 ## CloudShell Considerations
 
