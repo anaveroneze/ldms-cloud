@@ -1,0 +1,22 @@
+services:
+  aggregator:
+    build: .
+    hostname: aggregator
+    command: ldmsd -x sock:10444 -c /etc/ldms/agg.conf -l /tmp/agg.log -v INFO -m 1g
+    volumes:
+      - ./agg.conf:/etc/ldms/agg.conf:ro
+      - ldms-data:/data/ldms-csv
+
+  sampler:
+    build: .
+    command: >
+      sh -c "until ldms_ls -x sock -p 10444 -h aggregator &>/dev/null; do sleep 2; done &&
+             sed s/__NODE__/$$(hostname)/g /etc/ldms/sampler.conf > /tmp/samplerd.conf &&
+             ldmsd -x sock:10444 -c /tmp/samplerd.conf -l /tmp/sampler.log -v INFO"
+    volumes:
+      - ./sampler.conf:/etc/ldms/sampler.conf:ro
+    depends_on:
+      - aggregator
+
+volumes:
+  ldms-data:

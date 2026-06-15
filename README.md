@@ -23,34 +23,30 @@ cd ~
 git clone https://github.com/anaveroneze/ldms-cloud.git
 cd ldms-cloud
 
-# 2. Create S3 bucket for config files (if it doesn't exist) and upload config files to S3 (one shared sampler config for all samplers)
-./create_s3.sh
+# 2. Create S3 bucket for config files (if it doesn't exist) and upload config files 
+bash create_s3.sh
 
-# 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
+# 3. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
 #    Scale the cluster by setting NUM_SAMPLERS (default 2), e.g.:
 #    NUM_SAMPLERS=3 ./launch_instances.sh
-./launch_instances.sh
+bash launch_instances.sh
 
-# 5. Start cluster (build + daemon startup); ~10-15 min (LDMS compiles from source)
-./start_cluster.sh
+# 4. Start cluster (build + daemon startup); ~10-15 min (LDMS compiles from source)
+bash start_cluster.sh
 
-# 6. Fetch collected CSV data to CloudShell (do this BEFORE terminating)
-./fetch_data.sh
+# 5. Fetch collected CSV data to CloudShell (do this BEFORE terminating)
+bash fetch_data.sh
 
-# 7. Tear down
-./kill_instances.sh --stop    # Stop daemons only (instances keep running)
-./kill_instances.sh           # Stop daemons and terminate all instances
+# 6. Finish instances
+bash kill_instances.sh --stop    # Stop daemons only (instances keep running)
+bash kill_instances.sh           # Stop daemons and terminate all instances
 ```
-
-If CloudShell times out from inactivity, just reconnect and `cd ~/ldms-cloud` — all state lives in AWS (see [CloudShell Considerations](#cloudshell-considerations)).
-
-### Local Machine Deployment
-
-Same steps as CloudShell, but requires:
-- `aws configure` with your credentials 
+ 
+Local machine deployment requires the same steps as CloudShell, but needs the `aws configure` credentials.
 
 ## Repository Contents
 
+- `create_s3.sh` — creates the S3 storage bucket, shared among all instances in the same IAM 
 - `launch_instances.sh` — provisions AWS infrastructure, launches the aggregator + `NUM_SAMPLERS` samplers, tags them by role
 - `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then samplers with readiness checks
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)

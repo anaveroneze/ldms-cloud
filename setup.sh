@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# No 'set -e': autogen.sh/autoreconf can return non-zero on benign warnings
-# while still producing a working build. Success is gated by 'which ldmsd' below.
 export DEBIAN_FRONTEND=noninteractive
 
 # 1. Install dependencies
