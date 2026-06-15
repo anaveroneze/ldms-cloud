@@ -143,7 +143,7 @@ SAMPLER_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=sampler" \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["sudo -u ubuntu bash -c \"'"$LDMS_ENV"' && aws s3 cp s3://'$S3_BUCKET'/'$S3_PREFIX'/\\$(hostname).conf /home/ubuntu/samplerd.conf && until /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h '$AGG_HOSTNAME' &>/dev/null; do echo Waiting for aggregator...; sleep 2; done; { /home/ubuntu/ovis/build/sbin/ldmsd -x sock:10444 -c /home/ubuntu/samplerd.conf -l /tmp/sampler.log -v INFO ; } > /tmp/sampler.out 2>&1 < /dev/null & sleep 5; pgrep -x ldmsd\""]' \
+    --parameters 'commands=["sudo -u ubuntu bash -c \"'"$LDMS_ENV"' && aws s3 cp s3://'$S3_BUCKET'/'$S3_PREFIX'/sampler.conf /tmp/sampler.conf && sed s/__NODE__/\\$(hostname)/g /tmp/sampler.conf > /home/ubuntu/samplerd.conf && until /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h '$AGG_HOSTNAME' &>/dev/null; do echo Waiting for aggregator...; sleep 2; done; { /home/ubuntu/ovis/build/sbin/ldmsd -x sock:10444 -c /home/ubuntu/samplerd.conf -l /tmp/sampler.log -v INFO ; } > /tmp/sampler.out 2>&1 < /dev/null & sleep 5; pgrep -x ldmsd\""]' \
     --query 'Command.CommandId' \
     --output text)
 

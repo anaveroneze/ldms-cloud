@@ -9,7 +9,11 @@ INSTANCE_TYPE="t2.medium"
 SG_NAME="cluster-sg"
 HOSTED_ZONE_NAME="cluster.internal"
 DHCP_OPTIONS_NAME="cluster-dhcp-options"
-INSTANCE_NAMES=("aggregator" "sampler1" "sampler2")
+NUM_SAMPLERS="${NUM_SAMPLERS:-2}"   # number of sampler nodes; scale here (or via env)
+
+# 1 aggregator + NUM_SAMPLERS samplers (samplerd-1 .. samplerd-N)
+INSTANCE_NAMES=("aggregator")
+for i in $(seq 1 "$NUM_SAMPLERS"); do INSTANCE_NAMES+=("samplerd-$i"); done
 
 # ----------------------------
 # Region

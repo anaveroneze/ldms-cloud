@@ -1,6 +1,6 @@
 # LDMS Cluster Deployment on AWS
 
-This repository provides scripts and configurations to deploy a 3-node LDMS (Lightweight Distributed Metric Service) telemetry cluster on AWS EC2: **1 aggregator + 2 samplers**. Samplers collect `meminfo` metrics every second, advertise themselves to the aggregator, and the aggregator pulls and stores the data as CSV.
+This repository provides scripts and configurations to deploy an LDMS (Lightweight Distributed Metric Service) telemetry cluster on AWS EC2: **1 aggregator + N samplers** (default 2; set `NUM_SAMPLERS` to scale). Samplers collect `meminfo` metrics every second, advertise themselves to the aggregator, and the aggregator pulls and stores the data as CSV.
 
 **A collaboration between Northeastern University and Sandia National Laboratories.**
 
@@ -9,8 +9,10 @@ This repository provides scripts and configurations to deploy a 3-node LDMS (Lig
 ### Prerequisites
 
 - AWS CLI configured with credentials
+  - Change the name of your AWS Access Key (IAM - Identity and Access Management) in `launch_instances.sh`
 - AWS CloudShell (recommended) or local machine with AWS CLI
 - S3 bucket for storing config files (e.g., `ldms-telemetry`)
+
 
 ### CloudShell Quick Start (Recommended)
 
@@ -26,12 +28,13 @@ cd ldms-cloud
 BUCKET="ldms-telemetry"
 aws s3 mb "s3://$BUCKET" --region us-east-1 2>/dev/null || echo "Bucket already exists"
 
-# 3. Upload config files to S3
+# 3. Upload config files to S3 (one shared sampler config for all samplers)
 aws s3 cp agg.conf "s3://$BUCKET/ldms/"
-aws s3 cp sampler1.conf "s3://$BUCKET/ldms/"
-aws s3 cp sampler2.conf "s3://$BUCKET/ldms/"
+aws s3 cp sampler.conf "s3://$BUCKET/ldms/"
 
 # 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
+#    Scale the cluster by setting NUM_SAMPLERS (default 2), e.g.:
+#    NUM_SAMPLERS=3 ./launch_instances.sh
 ./launch_instances.sh
 
 # 5. Start cluster (build + daemon startup); ~10-15 min (LDMS compiles from source)
@@ -60,12 +63,12 @@ Same steps as CloudShell, but requires:
 
 ## Repository Contents
 
-- `launch_instances.sh` — provisions AWS infrastructure, launches 3 EC2 instances, tags them by role
+- `launch_instances.sh` — provisions AWS infrastructure, launches the aggregator + `NUM_SAMPLERS` samplers, tags them by role
 - `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then samplers with readiness checks
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
 - `fetch_data.sh` — copies the aggregator's collected CSV data to CloudShell via S3
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
-- `agg.conf`, `sampler1.conf`, `sampler2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
+- `agg.conf`, `sampler.conf` — LDMS daemon configs (stored in S3, pulled at daemon start); `sampler.conf` is one shared template used by every sampler
 
 ## Detailed Workflow
 
@@ -74,35 +77,35 @@ Same steps as CloudShell, but requires:
 Run `launch_instances.sh` to:
 - Create a security group (`cluster-sg`)
 - Set up Route 53 private hosted zone (`cluster.internal`)
-- Launch 3 EC2 instances (t2.medium, Ubuntu 22.04 LTS, 20 GiB storage)
+- Launch `1 + NUM_SAMPLERS` EC2 instances (t2.medium, Ubuntu 22.04 LTS, 20 GiB storage)
 - Tag instances by role: `LDMSRole=aggregator`, `LDMSRole=sampler`
 - Create private DNS A records for internal connectivity
 
 ```bash
-./launch_instances.sh
+./launch_instances.sh              # default: 2 samplers
+NUM_SAMPLERS=3 ./launch_instances.sh   # scale to 3 samplers
 ```
 
 The script is idempotent — reuses existing security group, DNS zone, and instances if they exist.
 
 **Instance details:**
 - **Aggregator** (`aggregator.cluster.internal`): listens for sampler connections on port 10444
-- **Samplers** (`sampler1.cluster.internal`, `sampler2.cluster.internal`): collect meminfo metrics every 1s
+- **Samplers** (`samplerd-1`, `samplerd-2`, … `samplerd-N`): collect meminfo metrics every 1s
 
 ### Step 2: Configure Daemon Files
 
-Before running `start_cluster.sh`, ensure config files are in S3:
+Before running `start_cluster.sh`, ensure config files are in S3 (one shared `sampler.conf` is used by every sampler):
 
 ```bash
-# Edit config files locally as needed (see agg.conf, sampler*.conf)
+# Edit config files locally as needed (see agg.conf, sampler.conf)
 # Then upload to S3
 
 BUCKET="ldms-telemetry"
 aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp sampler1.conf s3://$BUCKET/ldms/
-aws s3 cp sampler2.conf s3://$BUCKET/ldms/
+aws s3 cp sampler.conf s3://$BUCKET/ldms/
 ```
 
-The sampler configs already point at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed.
+`sampler.conf` already points at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed. Its `__NODE__` placeholder is replaced with each node's hostname at start time.
 
 ### Step 3: Start Cluster
 
@@ -144,7 +147,7 @@ aws ssm send-command \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h localhost -v"]'
 ```
 
-Expected output (when healthy):
+Expected output (when healthy) — one row per sampler:
 
 ```
 Schema   Instance              Flags  Msize  Dsize
@@ -181,11 +184,10 @@ Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fe
   - Pulls metrics every 1s with 100ms offset
   - Stores CSV to `/home/ubuntu/ldms-csv`
 
-- **`sampler1.conf`, `sampler2.conf`** — sampler configurations
-  - Named to match each node's hostname (`sampler1`, `sampler2`) so each node fetches `$(hostname).conf`
-  - Advertise to aggregator on port 10444
-  - Collect meminfo metrics every 1s
-  - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`sampler1`/`sampler2`), so it must stay `sampler.*`
+- **`sampler.conf`** — one shared sampler configuration template used by every sampler
+  - `producer=__NODE__ instance=__NODE__/meminfo`: at start time each node replaces `__NODE__` with its own `$(hostname)` (e.g. `samplerd-1`), so the metric sets are unique per sampler
+  - Advertises to the aggregator on port 10444 and collects meminfo every 1s
+  - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`samplerd-1`, `samplerd-2`, …), so it stays `sampler.*` regardless of how many samplers you run
 
 ## Monitoring and Troubleshooting
 
