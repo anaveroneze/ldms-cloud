@@ -54,6 +54,21 @@ Local machine deployment requires the same steps as CloudShell, but needs the `a
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
 - `agg.conf`, `sampler.conf` — LDMS daemon configs (stored in S3, pulled at daemon start); `sampler.conf` is one shared template used by every sampler
 
+## Deployment Options
+
+| | EC2 workflow | Docker workflow |
+|---|---|---|
+| Where it runs | AWS EC2 (3+ instances) | Local machine or CloudShell |
+| Setup | `./launch_instances.sh` + `./start_cluster.sh` | `docker-compose up` |
+| Aggregator address | `aggregator.cluster.internal` | `aggregator` (Compose DNS) |
+| CSV output | `/home/ubuntu/ldms-csv` on aggregator | Docker volume `/data/ldms-csv` |
+| Scaling | `NUM_SAMPLERS=N ./launch_instances.sh` | `--scale sampler=N` |
+| Setup time | ~15 min per launch (LDMS compiles from source) | ~15 min once, then instant |
+| Cost | ~$0.16/hr | Free |
+| Good for | Real distributed collection | Testing, local dev |
+
+See [`docker/README.md`](docker/README.md) for the Docker workflow.
+
 ## Detailed Workflow
 
 ### Step 1: Provision Infrastructure

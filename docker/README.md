@@ -25,15 +25,15 @@ docker-compose build
 export DOCKER_BUILDKIT=0
 export COMPOSE_DOCKER_CLI_BUILD=0
 docker-compose up
-
-# Scale to more samplers
-docker-compose up --scale sampler=4
-
-# Verify the cluster — should show one row per sampler
 docker-compose exec aggregator ldms_ls -x sock -p 10444 -h localhost -v
 
-# Fetch collected CSV data to ./ldms-data/
+# Scale to more samplers
+docker-compose up --scale sampler=3
+docker-compose exec aggregator ldms_ls -x sock -p 10444 -h localhost -v
+
 docker cp $(docker-compose ps -q aggregator):/data/ldms-csv ./ldms-data
+ls ldms-data/
+less ldms-data/ldms_data/meminfo
 
 # Stop and remove containers
 docker-compose down
