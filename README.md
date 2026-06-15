@@ -9,7 +9,7 @@ This repository provides scripts and configurations to deploy an LDMS (Lightweig
 ### Prerequisites
 
 - AWS CLI configured with credentials
-  - Change the name of your AWS Access Key (IAM - Identity and Access Management) in `launch_instances.sh`
+  - Set `KEY_NAME` in `launch_instances.sh` to your EC2 key pair name (used only for emergency SSH; the normal workflow is SSM-only)
 - AWS CloudShell (recommended) or local machine with AWS CLI
 - S3 bucket for storing config files (e.g., `ldms-telemetry`)
 
@@ -48,12 +48,7 @@ aws s3 cp sampler.conf "s3://$BUCKET/ldms/"
 ./kill_instances.sh           # Stop daemons and terminate all instances
 ```
 
-**If CloudShell times out (inactivity):**
-```bash
-# Just reconnect and resume
-cd ~/ldms-cloud
-aws ssm list-command-invocations --query '...' --output table
-```
+If CloudShell times out from inactivity, just reconnect and `cd ~/ldms-cloud` — all state lives in AWS (see [CloudShell Considerations](#cloudshell-considerations)).
 
 ### Local Machine Deployment
 
@@ -94,18 +89,7 @@ The script is idempotent — reuses existing security group, DNS zone, and insta
 
 ### Step 2: Configure Daemon Files
 
-Before running `start_cluster.sh`, ensure config files are in S3 (one shared `sampler.conf` is used by every sampler):
-
-```bash
-# Edit config files locally as needed (see agg.conf, sampler.conf)
-# Then upload to S3
-
-BUCKET="ldms-telemetry"
-aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp sampler.conf s3://$BUCKET/ldms/
-```
-
-`sampler.conf` already points at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed. Its `__NODE__` placeholder is replaced with each node's hostname at start time.
+Edit `agg.conf` / `sampler.conf` locally if needed, then upload them to S3 (the upload commands are in Quick Start step 3). One shared `sampler.conf` is used by every sampler: it already targets the aggregator's private DNS name (`aggregator.cluster.internal`), and its `__NODE__` placeholder is replaced with each node's hostname at start time — so no per-launch edits are needed.
 
 ### Step 3: Start Cluster
 
@@ -128,26 +112,7 @@ Run `start_cluster.sh` to:
 
 ### Step 4: Monitor and Verify
 
-Check SSM command status:
-
-```bash
-aws ssm list-command-invocations \
-  --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' \
-  --output table
-```
-
-Query metrics from the aggregator:
-
-Run `ldms_ls` on the aggregator via SSM (the private DNS name isn't reachable from CloudShell):
-
-```bash
-aws ssm send-command \
-  --targets "Key=tag:LDMSRole,Values=aggregator" \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h localhost -v"]'
-```
-
-Expected output (when healthy) — one row per sampler:
+Use the commands in [Monitoring and Troubleshooting](#monitoring-and-troubleshooting) to check SSM command status and query metrics. When the cluster is healthy, `ldms_ls` on the aggregator shows one row per sampler:
 
 ```
 Schema   Instance              Flags  Msize  Dsize
@@ -155,7 +120,7 @@ meminfo  samplerd-1/meminfo    CR     2976   544
 meminfo  samplerd-2/meminfo    CR     2976   544
 ```
 
-Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fetch_data.sh` to copy it to CloudShell.
+Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files; use `./fetch_data.sh` to copy it to CloudShell.
 
 ### Step 5: Cleanup
 

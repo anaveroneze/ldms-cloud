@@ -144,7 +144,7 @@ aws ec2 authorize-security-group-ingress \
   --port 22 \
   --cidr 0.0.0.0/0 2>/dev/null || true
 
-# Example service port - internal only
+# LDMS daemon port 10444 - internal to cluster members only
 aws ec2 authorize-security-group-ingress \
   --region "$REGION" \
   --group-id "$SG_ID" \
@@ -267,13 +267,13 @@ echo "✓ Using IAM instance profile: $INSTANCE_PROFILE_NAME"
 
 # ----------------------------
 # Launch instances
-# Configure OS hostname when the instances boot to set the short and the 
+# Configure OS hostname when the instances boot to set the short and the
 # full hostname (fqdn), and use the file info when launching the instances
 # ----------------------------
 INSTANCE_IDS=()
 
-for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do 
-  
+for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do
+
   USER_DATA_FILE=$(mktemp)
   cat > "$USER_DATA_FILE" <<EOF
 #cloud-config
@@ -302,7 +302,7 @@ EOF
     --user-data "file://$USER_DATA_FILE" \
     --query 'Instances[0].InstanceId' \
     --output text)
-  
+
   rm -f "$USER_DATA_FILE"
   INSTANCE_IDS+=("$ID")
   echo "Launched $INSTANCE_NAME: $ID"
@@ -377,4 +377,4 @@ echo
 echo "Internal DNS names created:"
 for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do
   echo "  ${INSTANCE_NAME}.${HOSTED_ZONE_NAME}"
-done 
+done

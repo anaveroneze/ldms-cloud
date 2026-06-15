@@ -110,4 +110,4 @@ echo "Step 2: Terminating instances..."
 echo "Terminating: ${INSTANCE_IDS[*]}"
 aws ec2 terminate-instances --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}" >/dev/null
 aws ec2 wait instance-terminated --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}"
-echo "✓ All instances terminated" 
+echo "✓ All instances terminated"
