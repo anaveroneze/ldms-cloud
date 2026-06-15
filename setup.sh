@@ -16,7 +16,8 @@ sudo apt-get install -y \
   python3-docutils \
   libjansson-dev \
   git \
-  build-essential
+  build-essential \
+  awscli
   
 cd "$HOME"
 git clone https://github.com/ovis-hpc/ovis.git
