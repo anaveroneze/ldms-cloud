@@ -18,15 +18,16 @@ docker-compose --version
 
 ```bash
 cd docker/
-
 # Build the LDMS image (once; reuse on subsequent runs)
 docker-compose build
 
 # Start the cluster (1 aggregator + 2 samplers)
-docker-compose up -d
+export DOCKER_BUILDKIT=0
+export COMPOSE_DOCKER_CLI_BUILD=0
+docker-compose up
 
 # Scale to more samplers
-docker-compose up -d --scale sampler=4
+docker-compose up --scale sampler=4
 
 # Verify the cluster — should show one row per sampler
 docker-compose exec aggregator ldms_ls -x sock -p 10444 -h localhost -v
@@ -44,7 +45,7 @@ Edit `agg.conf` or `sampler.conf` directly — they are mounted into the contain
 
 ## Differences from the EC2 workflow
 
-| | EC2 workflow | Docker workflow |
+|   | EC2 workflow | Docker workflow |
 |---|---|---|
 | Infrastructure | 3 EC2 instances | 1 machine (local or EC2) |
 | Aggregator address | `aggregator.cluster.internal` | `aggregator` (Compose DNS) |
