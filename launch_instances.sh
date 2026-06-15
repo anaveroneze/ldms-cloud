@@ -221,7 +221,7 @@ if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
     --role-name "$ROLE_NAME" \
     --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 
-  # Attach S3 policy for config access
+  # Attach S3 policy: read configs + write collected CSV data back to S3
   aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
     --policy-name "ldms-s3-access" \
@@ -230,8 +230,13 @@ if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
       "Statement": [
         {
           "Effect": "Allow",
-          "Action": ["s3:GetObject"],
-          "Resource": "arn:aws:s3:::ldms-*/ldms/*"
+          "Action": ["s3:GetObject", "s3:PutObject"],
+          "Resource": "arn:aws:s3:::ldms-*/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["s3:ListBucket"],
+          "Resource": "arn:aws:s3:::ldms-*"
         }
       ]
     }' >/dev/null
