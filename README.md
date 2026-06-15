@@ -8,8 +8,7 @@ This repository provides scripts and configurations to deploy an LDMS (Lightweig
 
 ### Prerequisites
 
-- AWS CLI configured with credentials
-  - Set `KEY_NAME` in `launch_instances.sh` to your EC2 key pair name (used only for emergency SSH; the normal workflow is SSM-only)
+- AWS CLI configured with credentials 
 - AWS CloudShell (recommended) or local machine with AWS CLI
 - S3 bucket for storing config files (e.g., `ldms-telemetry`)
 
@@ -24,13 +23,8 @@ cd ~
 git clone https://github.com/anaveroneze/ldms-cloud.git
 cd ldms-cloud
 
-# 2. Create S3 bucket for config files (if it doesn't exist)
-BUCKET="ldms-telemetry"
-aws s3 mb "s3://$BUCKET" --region us-east-1 2>/dev/null || echo "Bucket already exists"
-
-# 3. Upload config files to S3 (one shared sampler config for all samplers)
-aws s3 cp agg.conf "s3://$BUCKET/ldms/"
-aws s3 cp sampler.conf "s3://$BUCKET/ldms/"
+# 2. Create S3 bucket for config files (if it doesn't exist) and upload config files to S3 (one shared sampler config for all samplers)
+./create_s3.sh
 
 # 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
 #    Scale the cluster by setting NUM_SAMPLERS (default 2), e.g.:
@@ -53,8 +47,7 @@ If CloudShell times out from inactivity, just reconnect and `cd ~/ldms-cloud` â€
 ### Local Machine Deployment
 
 Same steps as CloudShell, but requires:
-- `aws configure` with your credentials
-- SSH key available if you need manual access (`~/.ssh/ana.pem`)
+- `aws configure` with your credentials 
 
 ## Repository Contents
 
