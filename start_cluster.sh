@@ -100,7 +100,7 @@ SETUP_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --instance-ids $INSTANCES \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["cd /tmp && curl -o setup.sh https://raw.githubusercontent.com/anaveroneze/ldms-cloud/main/setup.sh && bash setup.sh"]' \
+    --parameters 'commands=["cd /tmp && curl -o setup.sh https://raw.githubusercontent.com/anaveroneze/ldms-cloud/main/setup.sh && sudo -u ubuntu bash setup.sh"]' \
     --query 'Command.CommandId' \
     --output text)
 
