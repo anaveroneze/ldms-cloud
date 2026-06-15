@@ -28,8 +28,8 @@ aws s3 mb "s3://$BUCKET" --region us-east-1 2>/dev/null || echo "Bucket already 
 
 # 3. Upload config files to S3
 aws s3 cp agg.conf "s3://$BUCKET/ldms/"
-aws s3 cp samplerd-sampler1.conf "s3://$BUCKET/ldms/"
-aws s3 cp samplerd-sampler2.conf "s3://$BUCKET/ldms/"
+aws s3 cp sampler1.conf "s3://$BUCKET/ldms/"
+aws s3 cp sampler2.conf "s3://$BUCKET/ldms/"
 
 # 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
 ./launch_instances.sh
@@ -65,7 +65,7 @@ Same steps as CloudShell, but requires:
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
 - `fetch_data.sh` — copies the aggregator's collected CSV data to CloudShell via S3
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
-- `agg.conf`, `samplerd-sampler1.conf`, `samplerd-sampler2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
+- `agg.conf`, `sampler1.conf`, `sampler2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
 
 ## Detailed Workflow
 
@@ -93,13 +93,13 @@ The script is idempotent — reuses existing security group, DNS zone, and insta
 Before running `start_cluster.sh`, ensure config files are in S3:
 
 ```bash
-# Edit config files locally as needed (see agg.conf, samplerd-*.conf)
+# Edit config files locally as needed (see agg.conf, sampler*.conf)
 # Then upload to S3
 
 BUCKET="ldms-telemetry"
 aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-sampler1.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-sampler2.conf s3://$BUCKET/ldms/
+aws s3 cp sampler1.conf s3://$BUCKET/ldms/
+aws s3 cp sampler2.conf s3://$BUCKET/ldms/
 ```
 
 The sampler configs already point at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed.
@@ -181,8 +181,8 @@ Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fe
   - Pulls metrics every 1s with 100ms offset
   - Stores CSV to `/home/ubuntu/ldms-csv`
 
-- **`samplerd-sampler1.conf`, `samplerd-sampler2.conf`** — sampler configurations
-  - Named to match each node's hostname (`sampler1`, `sampler2`) so each node fetches `samplerd-$(hostname).conf`
+- **`sampler1.conf`, `sampler2.conf`** — sampler configurations
+  - Named to match each node's hostname (`sampler1`, `sampler2`) so each node fetches `$(hostname).conf`
   - Advertise to aggregator on port 10444
   - Collect meminfo metrics every 1s
   - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`sampler1`/`sampler2`), so it must stay `sampler.*`
