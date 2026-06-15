@@ -1,29 +1,55 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash 
+
 set -euo pipefail
+
 export DEBIAN_FRONTEND=noninteractive
+sudo apt-get update
 
-# 1. Install dependencies
-sudo apt-get update && sudo apt-get install -y \
-  autoconf pkg-config hdf5-tools libhdf5-openmpi-dev openmpi-bin python3.10 \
-  python-dev-is-python3 make bison flex python3-docutils libjansson-dev git \
-  build-essential awscli
+sudo apt-get install -y \
+  autoconf \
+  pkg-config \
+  hdf5-tools \
+  libhdf5-openmpi-dev \
+  openmpi-bin \
+  python3.10 \
+  python-dev-is-python3 \
+  make \
+  bison \
+  flex \
+  python3-docutils \
+  libjansson-dev \
+  git \
+  build-essential \
+  awscli
 
-# 2. Clone and build OVIS/LDMS
-[ -d "$HOME/ovis" ] || git clone https://github.com/ovis-hpc/ovis.git "$HOME/ovis"
-cd "$HOME/ovis" && ./autogen.sh
-mkdir -p build && cd build
-../configure --prefix="$PWD"
-make -j"$(nproc)" install
+cd "$HOME"
+# Idempotent: only clone if not already present (setup.sh re-runs on each launch)
+[ -d "$HOME/ovis" ] || git clone https://github.com/ovis-hpc/ovis.git
+cd "$HOME/ovis"
+./autogen.sh
+mkdir -p build
+cd build
+../configure --prefix="$HOME/ovis/build"
+make -j"$(nproc)"
+make install
 
-# 3. Write the environment file (for interactive use; sourced from .bashrc)
+# Environment file for interactive (SSH) use; sourced from .bashrc.
+# Note: start_cluster.sh sets these paths explicitly instead, because SSM
+# runs commands with HOME unset.
 cat > "$HOME/set-ldms-env.sh" <<'EOENV'
-export LDMS_INSTALL_PATH="$HOME/ovis/build"
-export PATH="$LDMS_INSTALL_PATH/sbin:$LDMS_INSTALL_PATH/bin:$PATH"
-export LD_LIBRARY_PATH="$LDMS_INSTALL_PATH/lib:${LD_LIBRARY_PATH:-}"
-export LDMSD_PLUGIN_LIBPATH="$LDMS_INSTALL_PATH/lib/ovis-ldms"
-export ZAP_LIBPATH="$LDMS_INSTALL_PATH/lib/ovis-ldms"
+#!/bin/sh
+export LDMS_INSTALL_PATH=${HOME}/ovis/build
+export PATH=$LDMS_INSTALL_PATH/sbin:$LDMS_INSTALL_PATH/bin:$PATH
+export LD_LIBRARY_PATH=$LDMS_INSTALL_PATH/lib:${LD_LIBRARY_PATH:-}
+export LDMSD_PLUGIN_LIBPATH=$LDMS_INSTALL_PATH/lib/ovis-ldms
+export ZAP_LIBPATH=$LDMS_INSTALL_PATH/lib/ovis-ldms
 EOENV
 
-# 4. Source it from .bashrc and verify the build
-grep -qxF 'source ~/set-ldms-env.sh' "$HOME/.bashrc" || echo 'source ~/set-ldms-env.sh' >> "$HOME/.bashrc"
-source "$HOME/set-ldms-env.sh" && which ldmsd && ldmsd -v
+chmod +x "$HOME/set-ldms-env.sh"
+
+if ! grep -qxF 'source ~/set-ldms-env.sh' "$HOME/.bashrc"; then
+  echo 'source ~/set-ldms-env.sh' >> "$HOME/.bashrc"
+fi
+
+. "$HOME/set-ldms-env.sh"
+which ldmsd
