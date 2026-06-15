@@ -1,5 +1,8 @@
-#!/usr/bin/env bash 
-export DEBIAN_FRONTEND=noninteractive 
+#!/usr/bin/env bash
+# Build LDMS/OVIS from source. Dispatched to each node via SSM by start_cluster.sh.
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
 
 sudo apt-get install -y \
@@ -18,9 +21,10 @@ sudo apt-get install -y \
   git \
   build-essential \
   awscli
-  
+
 cd "$HOME"
-git clone https://github.com/ovis-hpc/ovis.git
+# Idempotent: only clone if not already present (setup.sh re-runs on each launch)
+[ -d "$HOME/ovis" ] || git clone https://github.com/ovis-hpc/ovis.git
 cd "$HOME/ovis"
 ./autogen.sh
 mkdir -p build
@@ -29,6 +33,9 @@ cd build
 make -j"$(nproc)"
 make install
 
+# Environment file for interactive (SSH) use; sourced from .bashrc.
+# Note: start_cluster.sh sets these paths explicitly instead, because SSM
+# runs commands with HOME unset.
 cat > "$HOME/set-ldms-env.sh" <<'EOENV'
 #!/bin/sh
 export LDMS_INSTALL_PATH=${HOME}/ovis/build
@@ -45,4 +52,4 @@ if ! grep -qxF 'source ~/set-ldms-env.sh' "$HOME/.bashrc"; then
 fi
 
 . "$HOME/set-ldms-env.sh"
-which ldmsd 
+which ldmsd

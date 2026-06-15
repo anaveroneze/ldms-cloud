@@ -5,6 +5,7 @@ set -euo pipefail
 # Configuration
 SG_NAME="cluster-sg"
 STOP_ONLY=false
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,7 @@ done
 
 # Get security group ID
 SG_ID=$(aws ec2 describe-security-groups \
+    --region "$REGION" \
     --filters "Name=group-name,Values=$SG_NAME" \
     --query 'SecurityGroups[0].GroupId' \
     --output text)
@@ -48,6 +50,7 @@ fi
 # Get all running instances in the security group
 mapfile -t INSTANCE_IDS < <(
     aws ec2 describe-instances \
+        --region "$REGION" \
         --filters "Name=instance-state-name,Values=running" \
                   "Name=instance.group-id,Values=$SG_ID" \
         --query 'Reservations[].Instances[].InstanceId' \
@@ -62,12 +65,13 @@ fi
 echo "Found ${#INSTANCE_IDS[@]} running instance(s): ${INSTANCE_IDS[*]}"
 echo ""
 
-# Step 1: Gracefully stop LDMS daemons via SSM
+# Step 1: Gracefully stop LDMS daemons via SSM (pkill -x avoids matching this command's own wrapper)
 echo "Step 1: Stopping LDMS daemons via SSM..."
 STOP_CMD_ID=$(aws ssm send-command \
-    --targets "Key=tag:aws:cloudformation:stack-name,Values=ldms-cluster" \
+    --region "$REGION" \
+    --instance-ids "${INSTANCE_IDS[@]}" \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["pkill -f ldmsd || true"]' \
+    --parameters 'commands=["pkill -x ldmsd || true"]' \
     --query 'Command.CommandId' \
     --output text)
 
@@ -78,6 +82,7 @@ ELAPSED=0
 MAX_WAIT=60
 while [[ $ELAPSED -lt $MAX_WAIT ]]; do
     STATUS=$(aws ssm list-command-invocations \
+        --region "$REGION" \
         --command-id "$STOP_CMD_ID" \
         --query 'CommandInvocations[0].Status' \
         --output text 2>/dev/null || echo "")
@@ -103,6 +108,6 @@ fi
 # Step 2: Terminate instances
 echo "Step 2: Terminating instances..."
 echo "Terminating: ${INSTANCE_IDS[*]}"
-aws ec2 terminate-instances --instance-ids "${INSTANCE_IDS[@]}" >/dev/null
-aws ec2 wait instance-terminated --instance-ids "${INSTANCE_IDS[@]}"
+aws ec2 terminate-instances --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}" >/dev/null
+aws ec2 wait instance-terminated --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}"
 echo "✓ All instances terminated" 

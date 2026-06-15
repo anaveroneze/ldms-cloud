@@ -23,33 +23,26 @@ git clone https://github.com/anaveroneze/ldms-cloud.git
 cd ldms-cloud
 
 # 2. Create S3 bucket for config files (if it doesn't exist)
-BUCKET=”ldms-telemetry”
-aws s3 mb “s3://$BUCKET” --region us-east-1 2>/dev/null || echo “Bucket already exists”
+BUCKET="ldms-telemetry"
+aws s3 mb "s3://$BUCKET" --region us-east-1 2>/dev/null || echo "Bucket already exists"
 
 # 3. Upload config files to S3
-aws s3 cp agg.conf “s3://$BUCKET/ldms/”
-aws s3 cp samplerd-connector1.conf “s3://$BUCKET/ldms/”
-aws s3 cp samplerd-connector2.conf “s3://$BUCKET/ldms/”
+aws s3 cp agg.conf "s3://$BUCKET/ldms/"
+aws s3 cp samplerd-connector1.conf "s3://$BUCKET/ldms/"
+aws s3 cp samplerd-connector2.conf "s3://$BUCKET/ldms/"
 
-# 4. Verify configs are in S3
-aws s3 ls “s3://$BUCKET/ldms/”
-
-# 5. Launch instances (creates VPC, security group, DNS, IAM role)
+# 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
 ./launch_instances.sh
-# Takes ~3-5 minutes, shows instance details
 
-# 6. Start cluster (setup + daemon startup)
+# 5. Start cluster (build + daemon startup); ~10-15 min (LDMS compiles from source)
 ./start_cluster.sh
-# Takes ~10-15 minutes (15min for LDMS compile, ~2min for daemons)
 
-# 7. Monitor deployment
-aws ssm list-command-invocations \
-  --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' \
-  --output table
+# 6. Fetch collected CSV data to CloudShell (do this BEFORE terminating)
+./fetch_data.sh
 
-# 8. When done, stop daemons or terminate
-./kill_instances.sh --stop    # Stop daemons only
-./kill_instances.sh           # Terminate instances
+# 7. Tear down
+./kill_instances.sh --stop    # Stop daemons only (instances keep running)
+./kill_instances.sh           # Stop daemons and terminate all instances
 ```
 
 **If CloudShell times out (inactivity):**
@@ -70,9 +63,9 @@ Same steps as CloudShell, but requires:
 - `launch_instances.sh` — provisions AWS infrastructure, launches 3 EC2 instances, tags them by role
 - `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then connectors with readiness checks
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
+- `fetch_data.sh` — copies the aggregator's collected CSV data to CloudShell via S3
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
 - `agg.conf`, `samplerd-connector1.conf`, `samplerd-connector2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
-- `CLAUDE.md` — implementation guidance for Claude Code
 
 ## Detailed Workflow
 
@@ -109,7 +102,7 @@ aws s3 cp samplerd-connector1.conf s3://$BUCKET/ldms/
 aws s3 cp samplerd-connector2.conf s3://$BUCKET/ldms/
 ```
 
-**Important:** Replace `<AGG_IP>` placeholder in sampler configs with `aggregator.cluster.internal` (private DNS name).
+The sampler configs already point at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed.
 
 ### Step 3: Start Cluster
 
@@ -142,25 +135,32 @@ aws ssm list-command-invocations \
 
 Query metrics from the aggregator:
 
-```bash
-# List all metric sets
-ldms_ls -x sock -p 10444 -h aggregator.cluster.internal -v
+Run `ldms_ls` on the aggregator via SSM (the private DNS name isn't reachable from CloudShell):
 
-# View live data (example: meminfo from connector1)
-ldms_ls -x sock -p 10444 -h aggregator.cluster.internal -v meminfo
+```bash
+aws ssm send-command \
+  --targets "Key=tag:LDMSRole,Values=aggregator" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h localhost -v"]'
 ```
 
 Expected output (when healthy):
 
 ```
 Schema   Instance              Flags  Msize  Dsize
-meminfo  connector1/meminfo    CR     2976   544
-meminfo  connector2/meminfo    CR     2976   544
+meminfo  samplerd-1/meminfo    CR     2976   544
+meminfo  samplerd-2/meminfo    CR     2976   544
 ```
 
-Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files.
+Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fetch_data.sh` to copy it to CloudShell.
 
 ### Step 5: Cleanup
+
+⚠️ **Fetch your data first** — the CSV lives only on the aggregator's local disk and is lost on termination:
+
+```bash
+./fetch_data.sh    # aggregator -> S3 -> ./ldms-data/ in CloudShell
+```
 
 **Stop daemons only** (keep instances running):
 
@@ -168,13 +168,11 @@ Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files.
 ./kill_instances.sh --stop
 ```
 
-**Terminate all instances:**
+**Terminate all instances** (stops daemons via SSM first, then terminates):
 
 ```bash
 ./kill_instances.sh
 ```
-
-This gracefully stops LDMS daemons via SSM before terminating instances.
 
 ## Configuration Files
 
@@ -220,14 +218,11 @@ aws ec2 describe-instances \
 ### Query LDMS Metrics (Once Cluster is Running)
 
 ```bash
-# Get aggregator private IP
-AGG_IP=$(aws ec2 describe-instances \
-  --filters "Name=tag:LDMSRole,Values=aggregator" \
-  --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-  --output text)
-
-# Query metric sets (requires ldms_ls from your local machine, or SSH to aggregator)
-ldms_ls -x sock -p 10444 -h "$AGG_IP" -v
+# Run ldms_ls on the aggregator via SSM (port 10444 is not reachable from CloudShell)
+aws ssm send-command \
+  --targets "Key=tag:LDMSRole,Values=aggregator" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h localhost -v"]'
 ```
 
 ### Tail Logs (Via SSM)
@@ -255,33 +250,10 @@ aws ssm send-command \
 
 ## CloudShell Considerations
 
-When using AWS CloudShell:
-
-- **1 GB persistent storage** in `$HOME` — store code here
-- **20-minute inactivity timeout** — session resets if idle; keep scripts and config in S3 or Git
-- **No SSH keys** — use IAM credentials instead (already configured)
-- **Ideal for:** running provisioning/startup scripts, monitoring
-- **Not ideal for:** long-running interactive sessions (use EC2 instead)
-
-Recommended workflow in CloudShell:
-
-```bash
-# Clone repo (stored in $HOME for persistence)
-git clone https://github.com/anaveroneze/ldms-cloud.git
-cd ldms-cloud
-
-# Configs in S3 (survives session reset)
-aws s3 ls s3://ldms-telemetry/ldms/
-
-# Run provisioning scripts
-./launch_instances.sh
-./start_cluster.sh
-
-# Monitor via CloudShell or from local machine
-aws ssm list-command-invocations --query '...' --output table
-```
-
-If CloudShell times out, simply reconnect and clone the repo again — all state is in AWS (instances, S3, SSM commands).
+- **1 GB persistent storage** in `$HOME` — store the cloned repo here
+- **20-minute inactivity timeout** — session resets if idle, but all state lives in AWS (instances, S3, SSM), so just reconnect and `git clone` again
+- **No SSH keys** — IAM credentials are pre-configured; everything runs through SSM
+- Keep configs and collected data in S3 so they survive a session reset
 
 ## References
 
