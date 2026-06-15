@@ -179,7 +179,7 @@ This gracefully stops LDMS daemons via SSM before terminating instances.
 ## Configuration Files
 
 - **`agg.conf`** — aggregator configuration
-  - Listens for producers matching `samplerd.*` regex
+  - Listens for advertising nodes whose hostname matches `connector.*` regex
   - Pulls metrics every 1s with 100ms offset
   - Stores CSV to `/home/ubuntu/ldms-csv`
 
@@ -187,7 +187,7 @@ This gracefully stops LDMS daemons via SSM before terminating instances.
   - Named to match each node's hostname (`connector1`, `connector2`) so each node fetches `samplerd-$(hostname).conf`
   - Advertise to aggregator on port 10444
   - Collect meminfo metrics every 1s
-  - Producer names must be unique and match aggregator's listener pattern
+  - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`connector1`/`connector2`), so it must stay `connector.*`
 
 ## Monitoring and Troubleshooting
 
