@@ -4,11 +4,9 @@ set -euo pipefail
 # ----------------------------
 # Variables
 # ----------------------------
-KEY_NAME="ana"
 INSTANCE_TYPE="t2.medium"
 SG_NAME="cluster-sg"
 HOSTED_ZONE_NAME="cluster.internal"
-DHCP_OPTIONS_NAME="cluster-dhcp-options"
 NUM_SAMPLERS="${NUM_SAMPLERS:-2}"   # number of sampler nodes; scale here (or via env)
 
 # 1 aggregator + NUM_SAMPLERS samplers (samplerd-1 .. samplerd-N)
@@ -84,38 +82,6 @@ aws ec2 modify-vpc-attribute \
 echo "Enabled VPC DNS support and DNS hostnames"
 
 # ----------------------------
-# Create or reuse DHCP options set
-# This makes short names like 'aggregator' expand to '.cluster.internal'
-# ----------------------------
-DHCP_OPTIONS_ID=$(aws ec2 describe-dhcp-options \
-  --region "$REGION" \
-  --filters "Name=tag:Name,Values=$DHCP_OPTIONS_NAME" \
-  --query 'DhcpOptions[0].DhcpOptionsId' \
-  --output text)
-
-if [ "$DHCP_OPTIONS_ID" = "None" ] || [ -z "$DHCP_OPTIONS_ID" ]; then
-  DHCP_OPTIONS_ID=$(aws ec2 create-dhcp-options \
-    --region "$REGION" \
-    --dhcp-configurations \
-      "Key=domain-name,Values=$HOSTED_ZONE_NAME" \
-      "Key=domain-name-servers,Values=AmazonProvidedDNS" \
-    --query 'DhcpOptions.DhcpOptionsId' \
-    --output text)
-
-  aws ec2 create-tags \
-    --region "$REGION" \
-    --resources "$DHCP_OPTIONS_ID" \
-    --tags "Key=Name,Value=$DHCP_OPTIONS_NAME"
-fi
-
-aws ec2 associate-dhcp-options \
-  --region "$REGION" \
-  --dhcp-options-id "$DHCP_OPTIONS_ID" \
-  --vpc-id "$VPC_ID"
-
-echo "Using DHCP options: $DHCP_OPTIONS_ID"
-
-# ----------------------------
 # Create or reuse security group
 # ----------------------------
 SG_ID=$(aws ec2 describe-security-groups \
@@ -135,14 +101,6 @@ if [ "$SG_ID" = "None" ] || [ -z "$SG_ID" ]; then
 fi
 
 echo "Using Security Group: $SG_ID"
-
-# SSH from anywhere (kept for convenience if you need to log in from outside)
-aws ec2 authorize-security-group-ingress \
-  --region "$REGION" \
-  --group-id "$SG_ID" \
-  --protocol tcp \
-  --port 22 \
-  --cidr 0.0.0.0/0 2>/dev/null || true
 
 # LDMS daemon port 10444 - internal to cluster members only
 aws ec2 authorize-security-group-ingress \
@@ -293,7 +251,6 @@ EOF
     --image-id "$AMI_ID" \
     --count 1 \
     --instance-type "$INSTANCE_TYPE" \
-    --key-name "$KEY_NAME" \
     --security-group-ids "$SG_ID" \
     --subnet-id "$SUBNET_ID" \
     --iam-instance-profile "Name=$INSTANCE_PROFILE_NAME" \
