@@ -196,12 +196,12 @@ echo "Using Hosted Zone: $HZ_ID ($HOSTED_ZONE_NAME)"
 ROLE_NAME="ldms-cluster-role"
 INSTANCE_PROFILE_NAME="ldms-cluster-profile"
 
-# Check if role exists
-ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" \
-  --query 'Role.Arn' --output text 2>/dev/null || echo "")
+echo "Setting up IAM role and instance profile..."
 
-if [ -z "$ROLE_ARN" ]; then
-  ROLE_ARN=$(aws iam create-role \
+# Check if role exists
+if ! aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+  echo "Creating IAM role: $ROLE_NAME"
+  aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document '{
       "Version": "2012-10-17",
@@ -214,9 +214,7 @@ if [ -z "$ROLE_ARN" ]; then
           "Action": "sts:AssumeRole"
         }
       ]
-    }' \
-    --query 'Role.Arn' \
-    --output text)
+    }' >/dev/null
 
   # Attach SSM managed policy
   aws iam attach-role-policy \
@@ -232,34 +230,31 @@ if [ -z "$ROLE_ARN" ]; then
       "Statement": [
         {
           "Effect": "Allow",
-          "Action": [
-            "s3:GetObject"
-          ],
+          "Action": ["s3:GetObject"],
           "Resource": "arn:aws:s3:::ldms-*/ldms/*"
         }
       ]
-    }'
+    }' >/dev/null
+
+  echo "Waiting for role propagation (10s)..."
+  sleep 10
 fi
 
 # Create instance profile if it doesn't exist
-PROFILE_ARN=$(aws iam get-instance-profile \
-  --instance-profile-name "$INSTANCE_PROFILE_NAME" \
-  --query 'InstanceProfile.Arn' --output text 2>/dev/null || echo "")
-
-if [ -z "$PROFILE_ARN" ]; then
-  PROFILE_ARN=$(aws iam create-instance-profile \
-    --instance-profile-name "$INSTANCE_PROFILE_NAME" \
-    --query 'InstanceProfile.Arn' \
-    --output text)
+if ! aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE_NAME" &>/dev/null; then
+  echo "Creating instance profile: $INSTANCE_PROFILE_NAME"
+  aws iam create-instance-profile \
+    --instance-profile-name "$INSTANCE_PROFILE_NAME" >/dev/null
 
   aws iam add-role-to-instance-profile \
     --instance-profile-name "$INSTANCE_PROFILE_NAME" \
-    --role-name "$ROLE_NAME"
+    --role-name "$ROLE_NAME" >/dev/null
 
-  sleep 2  # Wait for propagation
+  echo "Waiting for instance profile propagation (10s)..."
+  sleep 10
 fi
 
-echo "Using IAM instance profile: $INSTANCE_PROFILE_NAME"
+echo "✓ Using IAM instance profile: $INSTANCE_PROFILE_NAME"
 
 # ----------------------------
 # Launch instances
