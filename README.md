@@ -1,238 +1,207 @@
-## **Step 1: Launch 3 EC2 Instances**
+# LDMS Cluster Deployment on AWS
 
-* AMI: Ubuntu Server 22.04 LTS  
-* Instance Type: t2.medium (4 GiB Memory, 2 vCPU)  
-* Storage: 20 GiB 
-* Key Pair: [key_name]  
-* All 3 instances assigned to same security group
-* Names: connector1, connector2, aggregator
+This repository provides scripts and configurations to deploy a 3-node LDMS (Lightweight Distributed Metric Service) telemetry cluster on AWS EC2: **1 aggregator + 2 samplers**. Samplers collect `meminfo` metrics every second, advertise themselves to the aggregator, and the aggregator pulls and stores the data as CSV.
 
-Added the following rules:
+**A collaboration between Northeastern University and Sandia National Laboratories.**
 
-| Connection | Protocol | Port | Source 
-| --- | --- | --- | --- |
-| SSH | TCP | 22 | 0.0.0.0/0 |
-| SSH | TCP | 10444 | 0.0.0.0/0 |
-| All | All | All | 0.0.0.0/0 |  
+## Quick Start
 
-Run: [launch_instances.sh](launch_instances.sh)
+### Prerequisites
 
-Check instances available:
+- AWS CLI configured with credentials
+- AWS CloudShell (recommended) or local machine with AWS CLI
+- S3 bucket for storing config files (e.g., `ldms-telemetry`)
 
-```bash 
-aws ec2 describe-instances \
-  --instance-ids "${INSTANCE_IDS[@]}" \
-  --query 'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,InstanceId:InstanceId,PublicIP:PublicIpAddress,PrivateIP:PrivateIpAddress,State:State.Name}' \
+**CloudShell Note:** CloudShell has 1 GB persistent storage in `$HOME` and resets after ~20 minutes of inactivity. Clone this repo and store configs in S3.
+
+### Deployment Steps
+
+```bash
+# 1. Clone repo (or cd into existing clone)
+git clone https://github.com/anaveroneze/ldms-cloud.git
+cd ldms-cloud
+
+# 2. Upload config files to S3
+BUCKET=”ldms-telemetry”
+aws s3 cp agg.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-1.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-2.conf s3://$BUCKET/ldms/
+
+# 3. Launch instances and start cluster
+./launch_instances.sh
+./start_cluster.sh
+
+# 4. Monitor progress via SSM
+aws ssm list-command-invocations --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' --output table
+
+# 5. Stop daemons or terminate (see below)
+./kill_instances.sh --stop    # Stop daemons only
+./kill_instances.sh           # Stop daemons and terminate instances
+```
+
+## Repository Contents
+
+- `launch_instances.sh` — provisions AWS infrastructure, launches 3 EC2 instances, tags them by role
+- `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then connectors with readiness checks
+- `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
+- `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
+- `agg.conf`, `samplerd-1.conf`, `samplerd-2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
+- `CLAUDE.md` — implementation guidance for Claude Code
+
+## Detailed Workflow
+
+### Step 1: Provision Infrastructure
+
+Run `launch_instances.sh` to:
+- Create a security group (`cluster-sg`)
+- Set up Route 53 private hosted zone (`cluster.internal`)
+- Launch 3 EC2 instances (t2.medium, Ubuntu 22.04 LTS, 20 GiB storage)
+- Tag instances by role: `LDMSRole=aggregator`, `LDMSRole=connector`
+- Create private DNS A records for internal connectivity
+
+```bash
+./launch_instances.sh
+```
+
+The script is idempotent — reuses existing security group, DNS zone, and instances if they exist.
+
+**Instance details:**
+- **Aggregator** (`aggregator.cluster.internal`): listens for sampler connections on port 10444
+- **Connectors** (`connector1.cluster.internal`, `connector2.cluster.internal`): collect meminfo metrics every 1s
+
+### Step 2: Configure Daemon Files
+
+Before running `start_cluster.sh`, ensure config files are in S3:
+
+```bash
+# Edit config files locally as needed (see agg.conf, samplerd-*.conf)
+# Then upload to S3
+
+BUCKET="ldms-telemetry"
+aws s3 cp agg.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-1.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-2.conf s3://$BUCKET/ldms/
+```
+
+**Important:** Replace `<AGG_IP>` placeholder in sampler configs with `aggregator.cluster.internal` (private DNS name).
+
+### Step 3: Start Cluster
+
+Run `start_cluster.sh` to:
+1. **Setup** — dispatches `setup.sh` to all instances via SSM (builds LDMS/OVIS from source)
+2. **Aggregator startup** — starts aggregator with `-m 1g` memory allocation
+3. **Connector startup** — starts connectors after aggregator readiness check
+4. **Verification** — confirms all metric sets are connected
+
+```bash
+./start_cluster.sh
+```
+
+**Behind the scenes:**
+- No SSH required — all commands dispatched via AWS Systems Manager (SSM)
+- Aggregator starts first and listens on port 10444
+- Connectors poll aggregator until it's reachable, then advertise themselves
+- Config files pulled from S3 at daemon startup
+- Logs stored locally: `/tmp/agg.log`, `/tmp/sampler.log`
+
+### Step 4: Monitor and Verify
+
+Check SSM command status:
+
+```bash
+aws ssm list-command-invocations \
+  --query 'CommandInvocations[*].[InstanceId,Status,CommandId]' \
   --output table
 ```
 
-```
------------------------------------------------------------------------------------
-|                                DescribeInstances                                |
-+----------------------+-------------+---------------+----------------+-----------+
-|      InstanceId      |    Name     |   PrivateIP   |   PublicIP     |   State   |
-+----------------------+-------------+---------------+----------------+-----------+
-|  ------------------- |  aggregator |    <AGG_IP>   |  52.23.243.247 |  running  |
-|  ------------------- |  connector2 |    <CONN1_IP> |  3.80.242.113  |  running  |
-|  ------------------- |  connector1 |    <CONN2_IP> |  107.22.96.232 |  running  |
-+----------------------+-------------+---------------+----------------+-----------+
-```
-
-Access as `ssh -i ~/"$KEY_NAME".pem ubuntu@<public-ip-node1>`
-
-## **Step 2: LDMS Installation (all nodes)** 
-
-Install in each node: [setup.sh](setup.sh)
-
-Optional, create an AWS AMI 
+Query metrics from the aggregator:
 
 ```bash
-aws ec2 create-image --instance-id <INSTANCE_ID> --name "ldms-ami-$(date +%s)" --no-reboot
+# List all metric sets
+ldms_ls -x sock -p 10444 -h aggregator.cluster.internal -v
+
+# View live data (example: meminfo from connector1)
+ldms_ls -x sock -p 10444 -h aggregator.cluster.internal -v meminfo
 ```
 
-## **Step 3: Configuration Files** 
+Expected output (when healthy):
 
-To get each IP address:
+```
+Schema   Instance              Flags  Msize  Dsize
+meminfo  connector1/meminfo    CR     2976   544
+meminfo  connector2/meminfo    CR     2976   544
+```
+
+Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files.
+
+### Step 5: Cleanup
+
+**Stop daemons only** (keep instances running):
 
 ```bash
-AGG_IP=$(aws ec2 describe-instances \
-  --filters Name=instance-state-name,Values=running Name=tag:Name,Values=aggregator \
-  --query 'Reservations[0].Instances[0].PublicIpAddress' \
-  --output text)
-
-COMM1_IP=$(aws ec2 describe-instances \
-  --filters Name=instance-state-name,Values=running Name=tag:Name,Values=connector1 \
-  --query 'Reservations[0].Instances[0].PublicIpAddress' \
-  --output text)
-
-COMM2_IP=$(aws ec2 describe-instances \
-  --filters Name=instance-state-name,Values=running Name=tag:Name,Values=connector2 \
-  --query 'Reservations[0].Instances[0].PublicIpAddress' \
-  --output text)
-
-echo "AGGREGATOR_IP=$AGGREGATOR_IP"
-echo "COMM1_IP=$COMM1_IP"
-echo "COMM2_IP=$COMM2_IP"
+./kill_instances.sh --stop
 ```
 
-### **Communicator 1**
+**Terminate all instances:**
 
 ```bash
-KEY_NAME="ana"
-ssh -i ~/"$KEY_NAME".pem ubuntu@"$COMM1_IP"
+./kill_instances.sh
 ```
 
-Create file called `samplerd-1.conf`:
+This gracefully stops LDMS daemons via SSM before terminating instances.
+
+## Configuration Files
+
+- **`agg.conf`** — aggregator configuration
+  - Listens for producers matching `connector.*` regex
+  - Pulls metrics every 1s with 100ms offset
+  - Stores CSV to `/home/ubuntu/ldms-csv`
+
+- **`samplerd-1.conf`, `samplerd-2.conf`** — sampler configurations
+  - Advertise to aggregator on port 10444
+  - Collect meminfo metrics every 1s
+  - Producer names must be unique and match aggregator's listener pattern
+
+## CloudShell Considerations
+
+When using AWS CloudShell:
+
+- **1 GB persistent storage** in `$HOME` — store code here
+- **20-minute inactivity timeout** — session resets if idle; keep scripts and config in S3 or Git
+- **No SSH keys** — use IAM credentials instead (already configured)
+- **Ideal for:** running provisioning/startup scripts, monitoring
+- **Not ideal for:** long-running interactive sessions (use EC2 instead)
+
+Recommended workflow in CloudShell:
 
 ```bash
-advertiser_add name=agg11 xprt=sock host=<AGG_IP> port=10444 reconnect=10s  
-advertiser_start name=agg11
+# Clone repo (stored in $HOME for persistence)
+git clone https://github.com/anaveroneze/ldms-cloud.git
+cd ldms-cloud
 
-load name=meminfo  
-config name=meminfo producer=samplerd-1 instance=samplerd-1/meminfo  
-start name=meminfo interval=1s
-```
-  
-- reconnect=10s: Retry connection every 10 seconds if disconnected  
-- interval=1s: Collect meminfo metrics every 1 second
+# Configs in S3 (survives session reset)
+aws s3 ls s3://ldms-telemetry/ldms/
 
-<!-- **With procnetdev2:**
-advertiser_add name=agg11 xprt=sock host="$AGG_IP" port=10444 reconnect=10s advertiser\_start name=agg11 load name=meminfo config name=meminfo producer=samplerd-1 instance=samplerd-1/meminfo start name=meminfo interval=1s load name=procnetdev2 config name=procnetdev2 producer=samplerd-1 instance=samplerd-1/procnetdev2 start name=procnetdev2 interval=1s -->
+# Run provisioning scripts
+./launch_instances.sh
+./start_cluster.sh
 
-### **Communicator 2**
-
-Create file called `samplerd-2.conf`: 
-
-```bash
-advertiser_add name=agg11 xprt=sock host=<AGG_IP> port=10444 reconnect=10s  
-advertiser_start name=agg11
-
-load name=meminfo  
-config name=meminfo producer=samplerd-2 instance=samplerd-2/meminfo  
-start name=meminfo interval=1s
-```
-<!-- 
-**With procnetdev2:**  
-advertiser\_add name=agg11 xprt=sock host="$AGG_IP" port=10444 reconnect=10s advertiser\_start name=agg11 load name=meminfo config name=meminfo producer=samplerd-2 instance=samplerd-2/meminfo start name=meminfo interval=1s load name=procnetdev2 config name=procnetdev2 producer=samplerd-2 instance=samplerd-2/procnetdev2 start name=procnetdev2 interval=1s -->
-
-### Aggregator
-
-Create file called `agg.conf`:  
- 
-- updtr: Pulls data from all connected producers every 1 second  
-- offset=100ms: Small offset to avoid simultaneous updates
-
-```bash
-prdcr_listen_add name=computes regex=ip-172-31-*
-prdcr_listen_start name=computes
-
-updtr_add name=all_sets interval=1s offset=100ms
-updtr_prdcr_add name=all_sets regex=.*
-updtr_start name=all_sets 
-``` 
-
-## **Step 4: Starting the Daemons** 
-
-**Step 1: aggregator**
-
-```bash
-ldmsd -x sock:10444 -c agg.conf -l /tmp/agg11.log -v INFO -m 1g &
+# Monitor via CloudShell or from local machine
+aws ssm list-command-invocations --query '...' --output table
 ```
 
-**Step 2: communicator 1**
+If CloudShell times out, simply reconnect and clone the repo again — all state is in AWS (instances, S3, SSM commands).
 
-```bash
-ldmsd -x sock:10444 -c samplerd-1.conf -l /tmp/sampler1.log -v INFO &
-```
+## References
 
-**Step 3: communicator 2**
+- **LDMS Documentation:** https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/
+- **OVIS GitHub:** https://github.com/ovis-hpc/ovis
+- **Peer Daemon Advertisement:** https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/rst_man/man/ldmsd_peer_daemon_advertisement.html
+- **AWS CloudShell:** https://docs.aws.amazon.com/cloudshell/latest/userguide/
+- **AWS Systems Manager Send-Command:** https://docs.aws.amazon.com/systems-manager/latest/userguide/send-commands.html
 
-```bash
-ldmsd -x sock:10444 -c samplerd-2.conf -l /tmp/sampler2.log -v INFO &
-```
-
-Flag -m 1g sets memory allocation to 1GB (vs default 512MB). This was one of the key fixes suggested by Sara and the LDMS team to resolve the buffer overflow crash.
-
-## **Step 5: Verification** 
-
-## **Process Check (node-3)**
-
-```bash
-ps aux | grep ldmsd | grep -v grep  
-```
-
-```
-ubuntu  51862  0.0  0.1 1378244 7424 pts/0  Sl  02:59  0:00   
-ldmsd -x sock:10444 -c /home/ubuntu/agg.conf -l /tmp/agg11.log -v INFO -m 1g
-```
-Aggregator log:
-
-```
-INFO: ldmsd: Listening on sock:10444 using `sock` transport and `none` authentication  
-INFO: ldmsd: Processing the config file '/home/ubuntu/agg.conf' is done.  
-INFO: ldmsd: Enabling in-band config  
-INFO: producer: Producer ip-172-31-35-155:10444 is connected  
-INFO: producer: Adding the metric set 'samplerd-1/meminfo'  
-INFO: producer: Producer ip-172-31-36-162:10444 is connected  
-INFO: producer: Adding the metric set 'samplerd-2/meminfo'  
-INFO: updater: Set samplerd-1/meminfo is ready  
-INFO: updater: Set samplerd-2/meminfo is ready
-```
- 
-```bash
-ldms_ls -x sock -p 10444 -h localhost -v  
-```
-
-```
-Schema   Instance              Flags  Msize  Dsize  Hsize  UID   GID   Perm  
-\-------- \--------------------- \------ \------ \------ \------ \----- \----- \----------  
-meminfo  samplerd-1/meminfo    CR     2976   544    0      1000  1000  \-r--r-----  
-meminfo  samplerd-2/meminfo    CR     2976   544    0      1000  1000  \-r--r-----
-
-Total Sets: 2, Meta Data (kB): 5.95, Data (kB) 1.09, Memory (kB): 7.04   
-```
-
-After 2 Minutes (Stability Check)
-
-```bash
-sleep 120 && ldms_ls -x sock -p 10444 -h localhost -v 
-```
-
-```
-Schema   Instance              Flags  Msize  Dsize  
-\-------- \--------------------- \------ \------ \-----  
-meminfo  samplerd-1/meminfo    CR     2976   544  
-meminfo  samplerd-2/meminfo    CR     2976   544
-```
- 
-Live Data Output (ldms_ls -v -l)
-
-**samplerd-1/meminfo (node-1):**
-
-MemTotal      4005964 KB (\~4GB)  
-MemFree       2293704 KB (\~2.3GB)  
-MemAvailable  3544900 KB  
-SwapTotal     0  
-SwapFree      0 
-
-**samplerd-2/meminfo (node-2):**
-
-MemTotal      4005960 KB (\~4GB)  
-MemFree       2263600 KB  
-MemAvailable  3515044 KB  
-SwapTotal     0  
-SwapFree      0
-
-To terminate all run [kill_instances.sh](kill_instances.sh)
-
----
-
-# **References**
-
-* LDMS Documentation: [https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/](https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/)  
-* OVIS GitHub: [https://github.com/ovis-hpc/ovis](https://github.com/ovis-hpc/ovis)  
-* Peer Daemon Advertisement: [https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/rst\_man/man/ldmsd\_peer\_daemon\_advertisement.html](https://ovis-hpc.readthedocs.io/projects/ldms/en/latest/rst_man/man/ldmsd_peer_daemon_advertisement.html)
+## Contributors
 
 *In collaboration between:*
-*- Northeastern University: Uttapreksha Patel, Ana Solorzano, Devesh Tiwari*
-*- Sandia National Laboratories: Sara Walton, Jim M. Brandt*
+- Northeastern University: Uttapreksha Patel, Ana Solorzano, Devesh Tiwari
+- Sandia National Laboratories: Sara Walton, Jim M. Brandt

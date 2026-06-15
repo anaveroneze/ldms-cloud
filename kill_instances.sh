@@ -1,31 +1,97 @@
-#!/usr/bin/env 
-mapfile -t SG_IDS < <(
-  aws ec2 describe-instances \
-    --instance-ids "${INSTANCE_IDS[@]}" \
-    --query 'Reservations[].Instances[].SecurityGroups[].GroupId' \
-    --output text | tr '\t' '\n' | sort -u
+#!/bin/bash
+
+set -euo pipefail
+
+# Configuration
+SG_NAME="cluster-sg"
+STOP_ONLY=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --stop)
+            STOP_ONLY=true
+            shift
+            ;;
+        --help)
+            cat <<EOF
+Usage: $0 [OPTIONS]
+
+Stop and/or terminate LDMS cluster instances in security group '$SG_NAME'.
+
+OPTIONS:
+  --stop        Stop LDMS daemons only (do not terminate instances)
+  --help        Show this help message
+
+Default behavior: Stop daemons gracefully, then terminate instances.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Get all running instances in the security group
+mapfile -t INSTANCE_IDS < <(
+    aws ec2 describe-instances \
+        --filters "Name=instance-state-name,Values=running" \
+                  "Name=security-group-name,Values=$SG_NAME" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text | tr ' ' '\n'
 )
 
-if [ ${#SG_IDS[@]} -ne 1 ]; then
-  echo "Expected exactly one shared security group, found: ${SG_IDS[*]}"
-  exit 1
-fi
-
-SG_ID="${SG_IDS[0]}" 
-
-mapfile -t INSTANCE_IDS < <(
-  aws ec2 describe-instances \
-    --filters Name=instance.group-id,Values="$SG_ID" Name=instance-state-name,Values=running \
-    --query 'Reservations[].Instances[].InstanceId' \
-    --output text | tr '\t' '\n'
-) 
-printf '%s\n' "${INSTANCE_IDS[@]}" 
-
 if [ ${#INSTANCE_IDS[@]} -eq 0 ]; then
-  echo "No running instances found in $SG_ID"
-  exit 0
+    echo "No running instances found in security group '$SG_NAME'"
+    exit 0
 fi
- 
+
+echo "Found ${#INSTANCE_IDS[@]} running instance(s): ${INSTANCE_IDS[*]}"
+echo ""
+
+# Step 1: Gracefully stop LDMS daemons via SSM
+echo "Step 1: Stopping LDMS daemons via SSM..."
+STOP_CMD_ID=$(aws ssm send-command \
+    --targets "Key=tag:aws:cloudformation:stack-name,Values=ldms-cluster" \
+    --document-name "AWS-RunShellScript" \
+    --parameters 'commands=["pkill -f ldmsd || true"]' \
+    --query 'Command.CommandId' \
+    --output text)
+
+echo "Stop command ID: $STOP_CMD_ID"
+
+# Poll for completion
+ELAPSED=0
+MAX_WAIT=60
+while [[ $ELAPSED -lt $MAX_WAIT ]]; do
+    STATUS=$(aws ssm list-command-invocations \
+        --command-id "$STOP_CMD_ID" \
+        --query 'CommandInvocations[0].Status' \
+        --output text 2>/dev/null || echo "")
+
+    if [[ "$STATUS" == "Success" ]] || [[ "$STATUS" == "Failed" ]]; then
+        echo "✓ Daemon stop command completed (status: $STATUS)"
+        break
+    fi
+
+    echo -n "."
+    sleep 2
+    ((ELAPSED += 2))
+done
+
+echo ""
+sleep 2
+
+if [ "$STOP_ONLY" = true ]; then
+    echo "✓ LDMS daemons stopped. Instances remain running."
+    exit 0
+fi
+
+# Step 2: Terminate instances
+echo "Step 2: Terminating instances..."
 echo "Terminating: ${INSTANCE_IDS[*]}"
 aws ec2 terminate-instances --instance-ids "${INSTANCE_IDS[@]}" >/dev/null
-aws ec2 wait instance-terminated --instance-ids "${INSTANCE_IDS[@]}" 
+aws ec2 wait instance-terminated --instance-ids "${INSTANCE_IDS[@]}"
+echo "✓ All instances terminated" 
