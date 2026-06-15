@@ -158,7 +158,7 @@ VERIFY_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
     --targets "Key=tag:LDMSRole,Values=aggregator" \
     --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["sudo -u ubuntu bash -c \"export HOME=/home/ubuntu && source /home/ubuntu/set-ldms-env.sh && echo '\"'\"'=== LDMS Metric Sets ==='\"'\"' && /home/ubuntu/ovis/build/bin/ldms_ls -x sock -p 10444 -h localhost -v && echo && echo '\"'\"'=== LDMSD Processes ==='\"'\"' && ps aux | grep ldmsd | grep -v grep\""]' \
+    --parameters 'commands=["sudo -u ubuntu bash -c \"export HOME=/home/ubuntu && source /home/ubuntu/set-ldms-env.sh && echo METRIC_SETS: && /home/ubuntu/ovis/build/bin/ldms_ls -x sock -p 10444 -h localhost -v; echo; echo LDMSD_PROCESSES:; ps aux | grep ldmsd | grep -v grep\""]' \
     --query 'Command.CommandId' \
     --output text)
 
