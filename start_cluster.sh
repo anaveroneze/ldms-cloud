@@ -9,12 +9,22 @@ S3_PREFIX="ldms"
 AGG_HOSTNAME="aggregator.cluster.internal"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
 
+# Helper function to get security group ID
+get_sg_id() {
+    aws ec2 describe-security-groups \
+        --region "$REGION" \
+        --filters "Name=group-name,Values=$SG_NAME" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text
+}
+
 # Helper function to get instances in the security group
 get_instances() {
+    local sg_id=$1
     aws ec2 describe-instances \
         --region "$REGION" \
         --filters "Name=instance-state-name,Values=running" \
-                  "Name=group-name,Values=$SG_NAME" \
+                  "Name=instance.group-id,Values=$sg_id" \
         --query 'Reservations[].Instances[].InstanceId' \
         --output text
 }
@@ -65,8 +75,16 @@ echo "Region: $REGION"
 echo "Security group: $SG_NAME"
 echo "S3 bucket: s3://$S3_BUCKET/$S3_PREFIX"
 
+# Get security group ID
+SG_ID=$(get_sg_id)
+if [[ -z "$SG_ID" ]] || [[ "$SG_ID" == "None" ]]; then
+    echo "✗ Security group '$SG_NAME' not found"
+    exit 1
+fi
+echo "Security group ID: $SG_ID"
+
 # Get instance IDs
-INSTANCES=$(get_instances)
+INSTANCES=$(get_instances "$SG_ID")
 if [[ -z "$INSTANCES" ]]; then
     echo "✗ No running instances found in security group '$SG_NAME'"
     exit 1

@@ -34,11 +34,22 @@ EOF
     esac
 done
 
+# Get security group ID
+SG_ID=$(aws ec2 describe-security-groups \
+    --filters "Name=group-name,Values=$SG_NAME" \
+    --query 'SecurityGroups[0].GroupId' \
+    --output text)
+
+if [[ -z "$SG_ID" ]] || [[ "$SG_ID" == "None" ]]; then
+    echo "✗ Security group '$SG_NAME' not found"
+    exit 1
+fi
+
 # Get all running instances in the security group
 mapfile -t INSTANCE_IDS < <(
     aws ec2 describe-instances \
         --filters "Name=instance-state-name,Values=running" \
-                  "Name=group-name,Values=$SG_NAME" \
+                  "Name=instance.group-id,Values=$SG_ID" \
         --query 'Reservations[].Instances[].InstanceId' \
         --output text | tr ' ' '\n'
 )
