@@ -74,7 +74,7 @@ echo ""
 # Step 1: Run setup.sh on all instances via SSM
 echo "Step 1: Running setup.sh on all instances..."
 SETUP_CMD_ID=$(aws ssm send-command \
-    --targets "Key=tag:aws:cloudformation:stack-name,Values=ldms-cluster" \
+    --instance-ids $INSTANCES \
     --document-name "AWS-RunShellScript" \
     --parameters 'commands=["cd /tmp && curl -o setup.sh https://raw.githubusercontent.com/anaveroneze/ldms-cloud/main/setup.sh && bash setup.sh"]' \
     --query 'Command.CommandId' \

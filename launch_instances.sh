@@ -191,6 +191,77 @@ HZ_ID="${HZ_ID##*/}"
 echo "Using Hosted Zone: $HZ_ID ($HOSTED_ZONE_NAME)"
 
 # ----------------------------
+# Create or reuse IAM role for SSM and S3 access
+# ----------------------------
+ROLE_NAME="ldms-cluster-role"
+INSTANCE_PROFILE_NAME="ldms-cluster-profile"
+
+# Check if role exists
+ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" \
+  --query 'Role.Arn' --output text 2>/dev/null || echo "")
+
+if [ -z "$ROLE_ARN" ]; then
+  ROLE_ARN=$(aws iam create-role \
+    --role-name "$ROLE_NAME" \
+    --assume-role-policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "ec2.amazonaws.com"
+          },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+    }' \
+    --query 'Role.Arn' \
+    --output text)
+
+  # Attach SSM managed policy
+  aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+
+  # Attach S3 policy for config access
+  aws iam put-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-name "ldms-s3-access" \
+    --policy-document '{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject"
+          ],
+          "Resource": "arn:aws:s3:::ldms-*/ldms/*"
+        }
+      ]
+    }'
+fi
+
+# Create instance profile if it doesn't exist
+PROFILE_ARN=$(aws iam get-instance-profile \
+  --instance-profile-name "$INSTANCE_PROFILE_NAME" \
+  --query 'InstanceProfile.Arn' --output text 2>/dev/null || echo "")
+
+if [ -z "$PROFILE_ARN" ]; then
+  PROFILE_ARN=$(aws iam create-instance-profile \
+    --instance-profile-name "$INSTANCE_PROFILE_NAME" \
+    --query 'InstanceProfile.Arn' \
+    --output text)
+
+  aws iam add-role-to-instance-profile \
+    --instance-profile-name "$INSTANCE_PROFILE_NAME" \
+    --role-name "$ROLE_NAME"
+
+  sleep 2  # Wait for propagation
+fi
+
+echo "Using IAM instance profile: $INSTANCE_PROFILE_NAME"
+
+# ----------------------------
 # Launch instances
 # Configure OS hostname when the instances boot to set the short and the 
 # full hostname (fqdn), and use the file info when launching the instances
@@ -207,6 +278,12 @@ hostname: ${INSTANCE_NAME}
 fqdn: ${INSTANCE_NAME}.${HOSTED_ZONE_NAME}
 manage_etc_hosts: true
 EOF
+  # Determine role from instance name
+  ROLE="connector"
+  if [ "$INSTANCE_NAME" = "aggregator" ]; then
+    ROLE="aggregator"
+  fi
+
   ID=$(aws ec2 run-instances \
     --region "$REGION" \
     --image-id "$AMI_ID" \
@@ -215,8 +292,9 @@ EOF
     --key-name "$KEY_NAME" \
     --security-group-ids "$SG_ID" \
     --subnet-id "$SUBNET_ID" \
+    --iam-instance-profile "Name=$INSTANCE_PROFILE_NAME" \
     --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME},{Key=LDMSRole,Value=$ROLE}]" \
     --user-data "file://$USER_DATA_FILE" \
     --query 'Instances[0].InstanceId' \
     --output text)
