@@ -9,7 +9,7 @@ INSTANCE_TYPE="t2.medium"
 SG_NAME="cluster-sg"
 HOSTED_ZONE_NAME="cluster.internal"
 DHCP_OPTIONS_NAME="cluster-dhcp-options"
-INSTANCE_NAMES=("aggregator" "connector1" "connector2")
+INSTANCE_NAMES=("aggregator" "sampler1" "sampler2")
 
 # ----------------------------
 # Region
@@ -279,7 +279,7 @@ fqdn: ${INSTANCE_NAME}.${HOSTED_ZONE_NAME}
 manage_etc_hosts: true
 EOF
   # Determine role from instance name
-  ROLE="connector"
+  ROLE="sampler"
   if [ "$INSTANCE_NAME" = "aggregator" ]; then
     ROLE="aggregator"
   fi

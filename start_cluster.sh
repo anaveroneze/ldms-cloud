@@ -133,26 +133,26 @@ fi
 echo "✓ Aggregator started"
 echo ""
 
-# Wait for the aggregator to stabilize before starting connectors
+# Wait for the aggregator to stabilize before starting samplers
 echo "Waiting for aggregator to stabilize..."
 sleep 5
 
-# Step 3: Start the connectors
-echo "Step 3: Starting connectors with readiness check..."
-CONN_CMD_ID=$(aws ssm send-command \
+# Step 3: Start the samplers
+echo "Step 3: Starting samplers with readiness check..."
+SAMPLER_CMD_ID=$(aws ssm send-command \
     --region "$REGION" \
-    --targets "Key=tag:LDMSRole,Values=connector" \
+    --targets "Key=tag:LDMSRole,Values=sampler" \
     --document-name "AWS-RunShellScript" \
     --parameters 'commands=["sudo -u ubuntu bash -c \"'"$LDMS_ENV"' && aws s3 cp s3://'$S3_BUCKET'/'$S3_PREFIX'/samplerd-\\$(hostname).conf /home/ubuntu/samplerd.conf && until /home/ubuntu/ovis/build/sbin/ldms_ls -x sock -p 10444 -h '$AGG_HOSTNAME' &>/dev/null; do echo Waiting for aggregator...; sleep 2; done; { /home/ubuntu/ovis/build/sbin/ldmsd -x sock:10444 -c /home/ubuntu/samplerd.conf -l /tmp/sampler.log -v INFO ; } > /tmp/sampler.out 2>&1 < /dev/null & sleep 5; pgrep -x ldmsd\""]' \
     --query 'Command.CommandId' \
     --output text)
 
-echo "Connector command ID: $CONN_CMD_ID"
-if ! poll_command_status "$CONN_CMD_ID"; then
-    echo "✗ Connector startup failed"
+echo "Sampler command ID: $SAMPLER_CMD_ID"
+if ! poll_command_status "$SAMPLER_CMD_ID"; then
+    echo "✗ Sampler startup failed"
     exit 1
 fi
-echo "✓ Connectors started"
+echo "✓ Samplers started"
 echo ""
 
 # Step 4: Verify cluster is healthy

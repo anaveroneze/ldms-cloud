@@ -28,8 +28,8 @@ aws s3 mb "s3://$BUCKET" --region us-east-1 2>/dev/null || echo "Bucket already 
 
 # 3. Upload config files to S3
 aws s3 cp agg.conf "s3://$BUCKET/ldms/"
-aws s3 cp samplerd-connector1.conf "s3://$BUCKET/ldms/"
-aws s3 cp samplerd-connector2.conf "s3://$BUCKET/ldms/"
+aws s3 cp samplerd-sampler1.conf "s3://$BUCKET/ldms/"
+aws s3 cp samplerd-sampler2.conf "s3://$BUCKET/ldms/"
 
 # 4. Launch instances (creates VPC, security group, DNS, IAM role); ~3-5 min
 ./launch_instances.sh
@@ -61,11 +61,11 @@ Same steps as CloudShell, but requires:
 ## Repository Contents
 
 - `launch_instances.sh` — provisions AWS infrastructure, launches 3 EC2 instances, tags them by role
-- `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then connectors with readiness checks
+- `start_cluster.sh` — dispatches `setup.sh` via SSM, starts aggregator first, then samplers with readiness checks
 - `setup.sh` — builds LDMS/OVIS from source on each node (run via SSM, no SSH)
 - `fetch_data.sh` — copies the aggregator's collected CSV data to CloudShell via S3
 - `kill_instances.sh` — gracefully stops daemons via SSM, optionally terminates instances
-- `agg.conf`, `samplerd-connector1.conf`, `samplerd-connector2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
+- `agg.conf`, `samplerd-sampler1.conf`, `samplerd-sampler2.conf` — LDMS daemon configs (stored in S3, pulled at daemon start)
 
 ## Detailed Workflow
 
@@ -75,7 +75,7 @@ Run `launch_instances.sh` to:
 - Create a security group (`cluster-sg`)
 - Set up Route 53 private hosted zone (`cluster.internal`)
 - Launch 3 EC2 instances (t2.medium, Ubuntu 22.04 LTS, 20 GiB storage)
-- Tag instances by role: `LDMSRole=aggregator`, `LDMSRole=connector`
+- Tag instances by role: `LDMSRole=aggregator`, `LDMSRole=sampler`
 - Create private DNS A records for internal connectivity
 
 ```bash
@@ -86,7 +86,7 @@ The script is idempotent — reuses existing security group, DNS zone, and insta
 
 **Instance details:**
 - **Aggregator** (`aggregator.cluster.internal`): listens for sampler connections on port 10444
-- **Connectors** (`connector1.cluster.internal`, `connector2.cluster.internal`): collect meminfo metrics every 1s
+- **Samplers** (`sampler1.cluster.internal`, `sampler2.cluster.internal`): collect meminfo metrics every 1s
 
 ### Step 2: Configure Daemon Files
 
@@ -98,8 +98,8 @@ Before running `start_cluster.sh`, ensure config files are in S3:
 
 BUCKET="ldms-telemetry"
 aws s3 cp agg.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-connector1.conf s3://$BUCKET/ldms/
-aws s3 cp samplerd-connector2.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-sampler1.conf s3://$BUCKET/ldms/
+aws s3 cp samplerd-sampler2.conf s3://$BUCKET/ldms/
 ```
 
 The sampler configs already point at the aggregator's private DNS name (`aggregator.cluster.internal`), so no per-launch IP edits are needed.
@@ -109,7 +109,7 @@ The sampler configs already point at the aggregator's private DNS name (`aggrega
 Run `start_cluster.sh` to:
 1. **Setup** — dispatches `setup.sh` to all instances via SSM (builds LDMS/OVIS from source)
 2. **Aggregator startup** — starts aggregator with `-m 1g` memory allocation
-3. **Connector startup** — starts connectors after aggregator readiness check
+3. **Sampler startup** — starts samplers after aggregator readiness check
 4. **Verification** — confirms all metric sets are connected
 
 ```bash
@@ -119,7 +119,7 @@ Run `start_cluster.sh` to:
 **Behind the scenes:**
 - No SSH required — all commands dispatched via AWS Systems Manager (SSM)
 - Aggregator starts first and listens on port 10444
-- Connectors poll aggregator until it's reachable, then advertise themselves
+- Samplers poll aggregator until it's reachable, then advertise themselves
 - Config files pulled from S3 at daemon startup
 - Logs stored locally: `/tmp/agg.log`, `/tmp/sampler.log`
 
@@ -177,15 +177,15 @@ Data flows to `/home/ubuntu/ldms-csv/` on the aggregator as CSV files. Use `./fe
 ## Configuration Files
 
 - **`agg.conf`** — aggregator configuration
-  - Listens for advertising nodes whose hostname matches `connector.*` regex
+  - Listens for advertising nodes whose hostname matches `sampler.*` regex
   - Pulls metrics every 1s with 100ms offset
   - Stores CSV to `/home/ubuntu/ldms-csv`
 
-- **`samplerd-connector1.conf`, `samplerd-connector2.conf`** — sampler configurations
-  - Named to match each node's hostname (`connector1`, `connector2`) so each node fetches `samplerd-$(hostname).conf`
+- **`samplerd-sampler1.conf`, `samplerd-sampler2.conf`** — sampler configurations
+  - Named to match each node's hostname (`sampler1`, `sampler2`) so each node fetches `samplerd-$(hostname).conf`
   - Advertise to aggregator on port 10444
   - Collect meminfo metrics every 1s
-  - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`connector1`/`connector2`), so it must stay `connector.*`
+  - The aggregator's `prdcr_listen` regex matches the advertising node's **hostname** (`sampler1`/`sampler2`), so it must stay `sampler.*`
 
 ## Monitoring and Troubleshooting
 
@@ -210,7 +210,7 @@ aws ssm list-command-invocations \
 ```bash
 # Show all cluster instances
 aws ec2 describe-instances \
-  --filters "Name=tag:LDMSRole,Values=aggregator,connector" Name=instance-state-name,Values=running \
+  --filters "Name=tag:LDMSRole,Values=aggregator,sampler" Name=instance-state-name,Values=running \
   --query 'Reservations[].Instances[].[Tags[?Key==`Name`]|[0].Value,State.Name,PrivateIpAddress,PublicIpAddress]' \
   --output table
 ```
@@ -234,9 +234,9 @@ aws ssm send-command \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["tail -50 /tmp/agg.log"]'
 
-# Check connector logs
+# Check sampler logs
 aws ssm send-command \
-  --targets "Key=tag:LDMSRole,Values=connector" \
+  --targets "Key=tag:LDMSRole,Values=sampler" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["tail -50 /tmp/sampler.log"]'
 ```
