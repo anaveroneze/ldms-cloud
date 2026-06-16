@@ -7,7 +7,7 @@ SG_NAME="cluster-sg"
 S3_BUCKET="${S3_BUCKET:-ldms-telemetry}"
 S3_PREFIX="ldms"
 AGG_HOSTNAME="aggregator.cluster.internal"
-REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
+REGION="us-east-1"
 
 # LDMS library paths (absolute, since SSM runs with HOME unset)
 LDMS_ENV="export LD_LIBRARY_PATH=/home/ubuntu/ovis/build/lib && export ZAP_LIBPATH=/home/ubuntu/ovis/build/lib/ovis-ldms && export LDMSD_PLUGIN_LIBPATH=/home/ubuntu/ovis/build/lib/ovis-ldms"

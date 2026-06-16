@@ -4,7 +4,7 @@ set -euo pipefail
 # Configuration
 SG_NAME="cluster-sg"
 STOP_ONLY=false
-export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
+export AWS_DEFAULT_REGION="us-east-1"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do

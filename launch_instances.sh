@@ -1,32 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ 
+INSTANCE_TYPE="t2.medium" # CHANGE HERE --- for another instance type
+SG_NAME="cluster-sg" # security group name
+HOSTED_ZONE_NAME="cluster.internal" # private hosted zone for internal DNS, e.g. aggregator.cluster.internal
+NUM_SAMPLERS="${NUM_SAMPLERS:-2}"
 
-# ----------------------------
-# Variables
-# ----------------------------
-INSTANCE_TYPE="t2.medium"
-SG_NAME="cluster-sg"
-HOSTED_ZONE_NAME="cluster.internal"
-NUM_SAMPLERS="${NUM_SAMPLERS:-2}"   # number of sampler nodes; scale here (or via env)
-
-# 1 aggregator + NUM_SAMPLERS samplers (samplerd-1 .. samplerd-N)
+# 1 aggregator + NUM_SAMPLERS samplers 
 INSTANCE_NAMES=("aggregator")
 for i in $(seq 1 "$NUM_SAMPLERS"); do INSTANCE_NAMES+=("samplerd-$i"); done
-
-# ----------------------------
-# Region
-# ----------------------------
-REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"
-if [ -z "${REGION}" ] || [ "${REGION}" = "None" ]; then
-  echo "Could not determine AWS region."
-  exit 1
-fi
-
+ 
+REGION="us-east-1"
 echo "REGION: $REGION"
-
-# ----------------------------
-# Get latest Ubuntu 22.04 AMI
-# ----------------------------
+ 
+# Get latest Ubuntu 22.04 AMI 
 AMI_PARAM="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
 
 AMI_ID=$(aws ssm get-parameter \
@@ -37,19 +24,12 @@ AMI_ID=$(aws ssm get-parameter \
 
 echo "AMI_ID: $AMI_ID"
 
-# ----------------------------
 # Use default VPC + one default subnet
-# ----------------------------
 VPC_ID=$(aws ec2 describe-vpcs \
   --region "$REGION" \
   --filters Name=is-default,Values=true \
   --query 'Vpcs[0].VpcId' \
   --output text)
-
-if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
-  echo "No default VPC found."
-  exit 1
-fi
 
 echo "VPC_ID: $VPC_ID"
 
@@ -59,16 +39,9 @@ SUBNET_ID=$(aws ec2 describe-subnets \
   --query 'Subnets[0].SubnetId' \
   --output text)
 
-if [ "$SUBNET_ID" = "None" ] || [ -z "$SUBNET_ID" ]; then
-  echo "No default subnet found in VPC $VPC_ID."
-  exit 1
-fi
-
 echo "SUBNET_ID: $SUBNET_ID"
-
-# ----------------------------
-# Ensure VPC DNS attributes are enabled
-# ----------------------------
+ 
+# Ensure VPC DNS attributes are enabled 
 aws ec2 modify-vpc-attribute \
   --region "$REGION" \
   --vpc-id "$VPC_ID" \
@@ -81,9 +54,7 @@ aws ec2 modify-vpc-attribute \
 
 echo "Enabled VPC DNS support and DNS hostnames"
 
-# ----------------------------
 # Create or reuse security group
-# ----------------------------
 SG_ID=$(aws ec2 describe-security-groups \
   --region "$REGION" \
   --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" \
@@ -125,10 +96,8 @@ aws ec2 authorize-security-group-ingress \
       \"UserIdGroupPairs\": [{\"GroupId\": \"$SG_ID\"}]
     }
   ]" 2>/dev/null || true
-
-# ----------------------------
-# Create or reuse Route 53 private hosted zone
-# ----------------------------
+ 
+# Create or reuse Route 53 private hosted zone 
 HZ_ID=$(aws route53 list-hosted-zones-by-name \
   --dns-name "$HOSTED_ZONE_NAME" \
   --query "HostedZones[?Name == '${HOSTED_ZONE_NAME}.'] | [?Config.PrivateZone == \`true\`] | [0].Id" \
@@ -151,13 +120,10 @@ fi
 
 HZ_ID="${HZ_ID##*/}"
 echo "Using Hosted Zone: $HZ_ID ($HOSTED_ZONE_NAME)"
-
-# ----------------------------
-# Create or reuse IAM role for SSM and S3 access
-# ----------------------------
+ 
+# Create or reuse IAM role for SSM and S3 access 
 ROLE_NAME="ldms-cluster-role"
 INSTANCE_PROFILE_NAME="ldms-cluster-profile"
-
 echo "Setting up IAM role and instance profile..."
 
 # Check if role exists
@@ -221,13 +187,13 @@ if ! aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE_NAM
   sleep 10
 fi
 
-echo "✓ Using IAM instance profile: $INSTANCE_PROFILE_NAME"
+echo "Using IAM instance profile: $INSTANCE_PROFILE_NAME"
 
 # ----------------------------
-# Launch instances
+# LAUNCH INSTANCES
 # Configure OS hostname when the instances boot to set the short and the
 # full hostname (fqdn), and use the file info when launching the instances
-# ----------------------------
+# ---------------------
 INSTANCE_IDS=()
 
 for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do
@@ -268,16 +234,11 @@ done
 
 echo "Launched instances: ${INSTANCE_IDS[*]}"
 
-# ----------------------------
-# Wait until running
-# ----------------------------
 aws ec2 wait instance-running \
   --region "$REGION" \
   --instance-ids "${INSTANCE_IDS[@]}"
-
-# ----------------------------
-# Create private DNS records from private IPs
-# ----------------------------
+ 
+# Create private DNS records from private IPs 
 for ID in "${INSTANCE_IDS[@]}"; do
   INSTANCE_NAME=$(aws ec2 describe-instances \
     --region "$REGION" \
@@ -320,17 +281,14 @@ EOF
 
   echo "Created DNS: ${INSTANCE_NAME}.${HOSTED_ZONE_NAME} -> ${PRIVATE_IP}"
 done
-
-# ----------------------------
-# Show IDs and IPs
-# ----------------------------
+ 
+# Show IDs and IPs 
 aws ec2 describe-instances \
   --region "$REGION" \
   --instance-ids "${INSTANCE_IDS[@]}" \
   --query 'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,InstanceId:InstanceId,PrivateDNS:PrivateDnsName,PublicIP:PublicIpAddress,PrivateIP:PrivateIpAddress,State:State.Name}' \
   --output table
-
-echo
+ 
 echo "Internal DNS names created:"
 for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do
   echo "  ${INSTANCE_NAME}.${HOSTED_ZONE_NAME}"
