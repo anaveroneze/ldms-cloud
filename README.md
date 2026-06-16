@@ -12,7 +12,6 @@ This repository provides scripts and configurations to deploy an LDMS (Lightweig
 - AWS CloudShell (recommended) or local machine with AWS CLI
 - S3 bucket for storing config files (e.g., `ldms-telemetry`)
 
-
 ### CloudShell Quick Start (Recommended)
 
 CloudShell is ideal for this workflow — no setup needed, IAM credentials pre-configured, no SSH keys.
@@ -43,6 +42,30 @@ bash kill_instances.sh           # Stop daemons and terminate all instances
 ```
  
 Local machine deployment requires the same steps as CloudShell, but needs the `aws configure` credentials.
+
+The flow is: create_s3 → launch_instances → start_cluster → (monitor) → fetch_data → kill_instances.
+
+- `create_s3.sh` — Creates an S3 bucket, which is the Amazon cloud storage service that allows all EC2 instances  that have permissions to access the bucket to store and pull data from it. We will use the S3 bucket to upload the daemon config files and also to store the ldms-telemetry data. All is made via Amazon API so no need to ssh in the instances.
+
+- `launch_instances.sh` — This script will launch the aggregator and the samplers in separate EC2 instances in the default VPC, creates a security group (opens port 10444 for LDMS traffic), sets up Route 53 private DNS (cluster.internal), and attaches IAM instance profiles (SSM + S3 access). For each instance, we setup IAM Roles for SSM and S3, using SSM to start and stop daemons in the instances and the access to S3 bucket.
+
+  - A security group is a firewall that controls which network traffic can reach your instances. In this case, it allows LDMS traffic (port 10444) between cluster nodes only — no outside access.
+  - Hosted zone names lets instances find each other by name (e.g., aggregator.cluster.internal, samplerd-1.cluster.internal) instead of remembering IP addresses. The script creates this private DNS zone and registers each instance's name in it.
+  - AMI - Amazon Machine Image: pre-built OS image
+  - VPC - Virtual Private Cloud: a private network in AWS, used by instances to communicate with each other
+  - Route 53 - AWS DNS service. We create a private hosted zone (cluster.internal domain).
+  - IAM Roles - permissions profiles to define what AWS services each instance can use
+  - SSM - System Manager: command service similar to SSH but no need to open any ports. 
+  - SG - Security Group
+
+- `setup.sh` - Has the commands to install all python libraries, clone and build LDMS, and setup the correct paths.
+
+- `start_cluster.sh` — Runs the setup.sh in each instance via SSM, then starts the aggregator daemon, waits for it to stabilize, and starts all sampler daemons (which wait until the aggregator is reachable before connecting).
+
+- `fetch_data.sh` — Pushes the CSV monitoring data collected by the aggregator to the S3 bucket,
+  then downloads it to the local machine (CloudShell or your computer).
+
+- `kill_instances.sh` — Shuts down the LDMS daemons on all instances via SSM, then terminates the EC2 instances (or just stops them with --stop to preserve them).
 
 ## Repository Contents
 
