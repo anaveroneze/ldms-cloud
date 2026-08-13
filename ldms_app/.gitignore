@@ -1,0 +1,4 @@
+# Collected data and run artifacts fetched by fetch_results.sh
+results/
+summary.csv
+__pycache__/
