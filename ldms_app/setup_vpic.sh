@@ -46,23 +46,27 @@ if ! $DECK_ONLY; then
   #    Using lanl/vpic (the legacy version): its only dependencies are a C++11
   #    compiler and MPI. The Kokkos version (lanl/vpic-kokkos) needs Kokkos and
   #    has a documented OpenMP deck-linking bug.
-  #    The 'devel' branch auto-enables -fno-strict-aliasing for GCC; it is passed
-  #    explicitly below anyway, because the deck compile needs it too.
   [ -d "$VPIC_DIR" ] || git clone https://github.com/lanl/vpic.git "$VPIC_DIR"
   cd "$VPIC_DIR" || { echo "ERROR: cannot enter $VPIC_DIR"; exit 1; }
-  git checkout devel
   mkdir -p build && cd build
 
-  # Two non-obvious flag choices:
-  #  -O3 must be in CMAKE_CXX_FLAGS, not left to CMAKE_BUILD_TYPE=Release. VPIC's
+  # This is ../arch/gcc/reference-Release, the upstream reference build, with two
+  # deliberate changes:
+  #
+  #  -O3 is added to CMAKE_CXX_FLAGS rather than left to CMAKE_BUILD_TYPE. VPIC's
   #  CMakeLists appends only the Debug and RelWithDebInfo flag sets to the flags
-  #  used to compile the input deck, never CMAKE_CXX_FLAGS_RELEASE, so a plain
-  #  Release build would compile the deck at -O0.
-  #  USE_V4_SSE is the only vector option safe without -march: v4_sse.h uses
-  #  baseline SSE1/SSE2 intrinsics, and the build system adds no -march anywhere.
+  #  bin/vpic uses for the deck, never CMAKE_CXX_FLAGS_RELEASE - so the reference
+  #  script compiles libvpic at -O3 but the input deck at -O0.
+  #
+  #  USE_V4_SSE turns on the 128-bit vector path. Upstream recommends always
+  #  having a 128-bit width enabled so move_p vectorizes, and it is the only
+  #  vector option safe without -march: v4_sse.h uses baseline SSE1/SSE2
+  #  intrinsics, and the build system adds no -march anywhere.
+  #
+  #  ENABLE_INTEGRATED_TESTS is left off (the reference script sets it) because
+  #  it builds extra test decks this benchmark never runs.
   cmake \
     -DCMAKE_BUILD_TYPE=Release \
-    -DUSE_PTHREADS=ON \
     -DUSE_V4_SSE=ON \
     -DCMAKE_C_FLAGS="-O3 -rdynamic -fno-strict-aliasing" \
     -DCMAKE_CXX_FLAGS="-O3 -rdynamic -fno-strict-aliasing" \

@@ -229,11 +229,19 @@ the time series directly — there is no timezone conversion anywhere in the pip
 NP=2 bash run_benchmark.sh              # 2 ranks instead of 4
 IDLE=120 bash run_benchmark.sh          # longer baseline
 NP=8 bash run_benchmark.sh              # 8 ranks (uses the hyperthread siblings)
+NP=1 TPP=8 bash run_benchmark.sh        # hybrid: 1 rank, 8 threads per rank
+NP=4 TPP=2 bash run_benchmark.sh        # hybrid: 4 ranks x 2 threads
 ```
 
-One rank per *physical* core is the default because the particle push is memory-bandwidth-bound, so
-hyperthread siblings mostly contend rather than add throughput. `NP=8` versus `NP=4` is a reasonable
-experiment to run, not a free speedup.
+Total occupancy is `NP × TPP`. One rank per *physical* core (`NP=4, TPP=1`) is the default because
+the particle push is memory-bandwidth-bound, so hyperthread siblings mostly contend rather than add
+throughput. `NP=8` versus `NP=4` is a reasonable experiment to run, not a free speedup.
+
+`TPP` maps to VPIC's own `--tpp` flag, which spawns pthreads inside each MPI rank. When `TPP > 1` the
+run switches to `--bind-to none`, since binding a rank to a single core would make its threads share
+that one core. VPIC does not set thread affinity itself (upstream issue #32), which is the reason
+pure MPI is the default here — the hybrid mode is available for comparison, not as the recommended
+configuration.
 
 ### Step 6: Fetch and Analyze
 

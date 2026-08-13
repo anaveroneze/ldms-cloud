@@ -7,22 +7,25 @@
 #   ./run_benchmark.sh              60 s idle on each side, 4 MPI ranks
 #   IDLE=0 ./run_benchmark.sh       calibration run, no idle padding
 #   NP=8 ./run_benchmark.sh         8 ranks (keep NP a divisor of NY)
+#   NP=1 TPP=8 ./run_benchmark.sh   hybrid: 1 rank, 8 threads (VPIC --tpp)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./common.sh
 
 NP="${NP:-4}"
+TPP="${TPP:-1}"
 IDLE="${IDLE:-60}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"
 
 echo "=== VPIC benchmark run $RUN_ID ==="
 echo "MPI ranks:      $NP"
+echo "Threads/rank:   $TPP  (total occupancy $(( NP * TPP )))"
 echo "Idle baseline:  ${IDLE}s before and after"
 echo ""
 
 CMD="$NODE_BOOTSTRAP"
 CMD="$CMD && aws s3 cp s3://$BUCKET/$PREFIX/run_vpic_node.sh /tmp/run_vpic_node.sh --region $REGION"
-CMD="$CMD && sudo -u ubuntu env HOME=/home/ubuntu NP=$NP IDLE=$IDLE RUN_ID=$RUN_ID"
+CMD="$CMD && sudo -u ubuntu env HOME=/home/ubuntu NP=$NP TPP=$TPP IDLE=$IDLE RUN_ID=$RUN_ID"
 CMD="$CMD BUCKET=$BUCKET RESULTS_PREFIX=$RESULTS_PREFIX REGION=$REGION"
 CMD="$CMD bash /tmp/run_vpic_node.sh"
 

@@ -5,6 +5,7 @@
 set -uo pipefail
 
 NP="${NP:-4}"                                   # MPI ranks; keep it a divisor of ny
+TPP="${TPP:-1}"                                 # threads per rank (VPIC --tpp); 1 = pure MPI
 IDLE="${IDLE:-60}"                              # seconds of idle baseline per side
 RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"
 BUCKET="${BUCKET:-ldms-telemetry}"
@@ -26,12 +27,23 @@ cp "$BIN" .
 echo "Phase 1/3: idle baseline (${IDLE}s)"
 T_PRE_START=$(date +%s); sleep "$IDLE"; T_PRE_END=$(date +%s)
 
-# One rank per physical core. c5.2xlarge reports 8 vCPUs but has 4 cores; on a
-# memory-bandwidth-bound particle push the hyperthread siblings only contend.
-echo "Phase 2/3: VPIC on $NP ranks"
+# Total occupancy is NP x TPP. The default is one rank per physical core:
+# c5.2xlarge reports 8 vCPUs but has 4 cores, and on a memory-bandwidth-bound
+# particle push the hyperthread siblings mostly contend.
+#
+# In hybrid mode (TPP > 1) binding each rank to a single core would make that
+# rank's threads share one core, so binding is dropped. VPIC does not set thread
+# affinity itself (upstream issue #32), which is a reason to prefer pure MPI.
+if [ "$TPP" -gt 1 ]; then
+    BIND="--bind-to none"
+else
+    BIND="--bind-to core --map-by core"
+fi
+
+echo "Phase 2/3: VPIC on $NP ranks x $TPP thread(s) ($BIND)"
 T_RUN_START=$(date +%s)
-mpirun -np "$NP" --bind-to core --map-by core --report-bindings \
-  ./harris_bench.Linux > "$LOG" 2>&1
+mpirun -np "$NP" $BIND --report-bindings \
+  ./harris_bench.Linux --tpp "$TPP" > "$LOG" 2>&1
 RC=$?
 T_RUN_END=$(date +%s)
 
@@ -43,6 +55,7 @@ cat > "$META" <<EOF
   "run_id": "$RUN_ID",
   "hostname": "$(hostname)",
   "np": $NP,
+  "tpp": $TPP,
   "idle_seconds": $IDLE,
   "exit_code": $RC,
   "wall_seconds": $((T_RUN_END - T_RUN_START)),
