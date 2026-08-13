@@ -175,6 +175,13 @@ CSV_FILES:
 If a set is missing, stop here and check Common Issues — running the benchmark without it just
 produces an incomplete time series.
 
+The script is re-runnable: it stops any running `ldmsd` before starting, so a failed attempt can be
+retried directly. Use `--skip-build` to restart the daemons without rebuilding OVIS:
+
+```bash
+bash start_cluster.sh --skip-build
+```
+
 ### Step 4: Build VPIC
 
 Run `build_vpic.sh` to:
@@ -347,6 +354,12 @@ aws ssm send-command --targets "Key=tag:LDMSCluster,Values=ldms-app" \
   and VPIC declares 3.1. Use apt's CMake (3.22 on 22.04), not pip, snap or Kitware.
 - **`ldmsd` starts and immediately exits on the aggregator** → the `-m 1g` memory flag is required;
   the 512 MB default overruns its buffer and crashes.
+- **A daemon start sits in `InProgress` until it times out** → something in the SSM payload is still
+  holding the command's stdout/stderr open. SSM waits for those pipes to close, not just for the
+  shell to exit, so a backgrounded daemon must have all three fds redirected. The trap is that `&&`
+  binds tighter than `&`: `EXPORTS && { ldmsd; } > file &` backgrounds the whole list and forks
+  *before* the redirection reaches the brace group, leaving the subshell holding SSM's pipes. Put
+  everything inside the brace group: `{ EXPORTS && ldmsd; } > file 2>&1 < /dev/null &`.
 - **Non-zero `pswpin`/`pswpout` in the summary** → the deck is too large for the instance. Lower
   `NPPC` and rebuild with `--deck-only`.
 - **`analyze.py` reports `n/a` for CPU** → fewer than two samples fell inside that phase window. Any
