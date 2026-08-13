@@ -63,6 +63,29 @@ ssm_send() {
     rm -f "$pfile"
 }
 
+# fetch_ssm_log <command id> [tail lines]
+#
+# Print the untruncated stdout/stderr that SSM wrote to S3. The inline output in
+# the API response is capped at 2500 characters, which is far too short for a
+# compiler log, so ssm_send always also directs output to the bucket.
+fetch_ssm_log() {
+    local cid=$1 lines=${2:-80} dir f
+    dir=$(mktemp -d)
+
+    if aws s3 cp "s3://$BUCKET/ssm-logs/$cid/" "$dir/" \
+        --recursive --region "$REGION" >/dev/null 2>&1 && [ -n "$(ls -A "$dir")" ]; then
+        while IFS= read -r f; do
+            echo ""
+            echo "--- ${f#"$dir"/} (last $lines lines) ---"
+            tail -n "$lines" "$f"
+        done < <(find "$dir" -type f \( -name stdout -o -name stderr \) | sort)
+    else
+        echo "(no S3 log at s3://$BUCKET/ssm-logs/$cid/ yet - it can lag a few seconds)"
+    fi
+
+    rm -rf "$dir"
+}
+
 # show_command_output <command id>
 show_command_output() {
     aws ssm list-command-invocations \
@@ -96,6 +119,9 @@ poll_command_status() {
             echo ""
             echo "✗ Command failed on $bad instance(s)"
             show_command_output "$command_id"
+            echo ""
+            echo "=== Untruncated log from S3 ==="
+            fetch_ssm_log "$command_id"
             return 1
         fi
         if [ "$total" -gt 0 ] && [ "$ok" -eq "$total" ]; then

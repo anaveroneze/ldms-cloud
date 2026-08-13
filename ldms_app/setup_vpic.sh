@@ -33,9 +33,14 @@ if ! $DECK_ONLY; then
   #    Use apt's cmake (3.22 on 22.04). Do NOT install cmake from pip/snap/Kitware:
   #    VPIC declares cmake_minimum_required(VERSION 3.1) and CMake 4.x removed
   #    compatibility with < 3.5, which hard-fails configure.
-  sudo apt-get update && sudo apt-get install -y \
-    build-essential cmake git libopenmpi-dev openmpi-bin
-  [ $? -eq 0 ] || { echo "ERROR: apt-get install failed"; exit 1; }
+  #    sudo's env_reset drops DEBIAN_FRONTEND, so it has to be set on the sudo
+  #    line itself - otherwise debconf tries the Dialog frontend and fills the
+  #    log with "unable to initialize frontend" warnings before falling back.
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+    || { echo "ERROR: apt-get update failed"; exit 1; }
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    build-essential cmake git libopenmpi-dev openmpi-bin \
+    || { echo "ERROR: apt-get install failed"; exit 1; }
 
   # 2. Clone and build the VPIC library.
   #    Using lanl/vpic (the legacy version): its only dependencies are a C++11

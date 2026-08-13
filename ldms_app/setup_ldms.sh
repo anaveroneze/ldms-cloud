@@ -4,7 +4,10 @@
 export DEBIAN_FRONTEND=noninteractive
 
 # 1. Install dependencies
-sudo apt-get update && sudo apt-get install -y \
+# sudo's env_reset drops DEBIAN_FRONTEND, so it has to be set on the sudo line
+# itself, otherwise debconf noisily falls back through its frontends.
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   autoconf pkg-config hdf5-tools libhdf5-openmpi-dev openmpi-bin python3.10 \
   python-dev-is-python3 make bison flex python3-docutils libjansson-dev git \
   build-essential awscli
