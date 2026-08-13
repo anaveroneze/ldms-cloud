@@ -18,6 +18,19 @@ LDMS_ENV="export LD_LIBRARY_PATH=/home/ubuntu/ovis/build/lib && export ZAP_LIBPA
 LDMSD="/home/ubuntu/ovis/build/sbin/ldmsd"
 LDMS_LS="/home/ubuntu/ovis/build/sbin/ldms_ls"
 
+# Prefix for every node-side command that pulls from S3.
+#
+# Ubuntu cloud images do not ship the AWS CLI (Amazon Linux does), and each of
+# these scripts can be the first thing to touch a fresh node, so each one has to
+# be able to install it. 'command -v aws' makes it a no-op once installed, so the
+# apt cost is paid once per node rather than once per invocation.
+#
+# Waiting on cloud-init first avoids racing it for the dpkg lock, and also
+# guarantees the hostname from user-data has been applied - the aggregator
+# matches advertising nodes on their hostname, so starting the sampler before
+# that lands would break discovery.
+NODE_BOOTSTRAP="cloud-init status --wait > /dev/null 2>&1 || true; export DEBIAN_FRONTEND=noninteractive; command -v aws > /dev/null || { apt-get update -qq && apt-get install -y -qq awscli; }"
+
 # --- SSM helpers ------------------------------------------------------------
 
 # ssm_send <aggregator|sampler|all> <shell command>   ->  prints the command id

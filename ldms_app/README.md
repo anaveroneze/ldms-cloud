@@ -158,6 +158,11 @@ and everything else in this directory is delivered from S3, so `aws` has to exis
 also guarantees the hostname from user-data has been applied — the aggregator matches advertising
 nodes on their hostname, so starting before that lands would break discovery.
 
+This bootstrap is the `NODE_BOOTSTRAP` prefix in `common.sh`, and every script that fetches from S3
+uses it — `start_cluster.sh`, `build_vpic.sh`, `run_benchmark.sh` and `fetch_results.sh`. Any of them
+can therefore be the first thing to touch a fresh node. `command -v aws` makes it a no-op once the
+CLI is installed, so the apt cost is paid once per node, not once per invocation.
+
 Expected output from the verification step:
 
 ```
@@ -339,9 +344,9 @@ aws ssm send-command --targets "Key=tag:LDMSCluster,Values=ldms-app" \
 
 ### Common Issues
 
-- **`aws: not found`, `exit status 127`** → the AWS CLI is missing on the node. Only step 1 of
-  `start_cluster.sh` can hit this, because it installs the CLI before the first `s3 cp`; every later
-  step runs after it. If you see it elsewhere, that step ran before `start_cluster.sh` completed.
+- **`aws: not found`, `exit status 127`** → the AWS CLI is missing on the node. Every script that
+  fetches from S3 now installs it first (`NODE_BOOTSTRAP` in `common.sh`), so this should not happen;
+  if it does, the script is missing that prefix.
 - **A metric set is missing from `METRIC_SETS`** → check the sampler log for the plugin that failed:
   `grep -iE 'error|fail' /tmp/sampler.log` on the compute node, and confirm the plugin was built with
   `ls ~/ovis/build/lib/ovis-ldms/ | grep -E 'meminfo|vmstat|procstat'`. If `procstat` will not

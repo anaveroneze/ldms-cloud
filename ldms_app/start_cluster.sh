@@ -57,9 +57,7 @@ if $SKIP_BUILD; then
     echo "Step 1: Skipped (--skip-build)"
 else
     echo "Step 1: Building OVIS/LDMS on all nodes..."
-    CMD="cloud-init status --wait || true"
-    CMD="$CMD; export DEBIAN_FRONTEND=noninteractive"
-    CMD="$CMD; apt-get update -qq && apt-get install -y -qq awscli"
+    CMD="$NODE_BOOTSTRAP"
     CMD="$CMD && aws s3 cp s3://$BUCKET/$PREFIX/setup_ldms.sh /tmp/setup_ldms.sh --region $REGION"
     CMD="$CMD && sudo -u ubuntu bash /tmp/setup_ldms.sh"
     CID=$(ssm_send all "$CMD")

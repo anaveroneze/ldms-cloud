@@ -31,7 +31,8 @@ echo ""
 
 # HOME is set explicitly: sudo's env_reset normally provides it, but the node
 # script derives every path from $HOME so it is worth being unambiguous.
-CMD="aws s3 cp s3://$BUCKET/$PREFIX/setup_vpic.sh /tmp/setup_vpic.sh --region $REGION"
+CMD="$NODE_BOOTSTRAP"
+CMD="$CMD && aws s3 cp s3://$BUCKET/$PREFIX/setup_vpic.sh /tmp/setup_vpic.sh --region $REGION"
 CMD="$CMD && sudo -u ubuntu env HOME=/home/ubuntu NX=$NX NY=$NY NZ=$NZ NPPC=$NPPC NUM_STEP=$NUM_STEP bash /tmp/setup_vpic.sh$DECK_ONLY"
 
 CID=$(ssm_send sampler "$CMD")

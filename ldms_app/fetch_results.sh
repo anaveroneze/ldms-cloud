@@ -8,7 +8,8 @@ source ./common.sh
 OUT="results"
 
 echo "=== Pushing the aggregator's CSV to S3 ==="
-CMD="sudo -u ubuntu bash -c 'aws s3 cp /home/ubuntu/ldms-csv s3://$BUCKET/$DATA_PREFIX/ --recursive --region $REGION'"
+CMD="$NODE_BOOTSTRAP"
+CMD="$CMD && sudo -u ubuntu bash -c 'aws s3 cp /home/ubuntu/ldms-csv s3://$BUCKET/$DATA_PREFIX/ --recursive --region $REGION'"
 CID=$(ssm_send aggregator "$CMD")
 echo "Command ID: $CID"
 poll_command_status "$CID" 600 || echo "⚠ Continuing anyway - some data may be missing"
