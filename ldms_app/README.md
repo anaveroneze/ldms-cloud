@@ -147,9 +147,16 @@ cluster — it uses the same `LDMSRole` values.
 
 Run `start_cluster.sh` to:
 - Wait for both nodes to register with SSM (the agent comes up 30–60 s after boot)
+- Wait for cloud-init, then install the AWS CLI on both nodes
 - Build OVIS/LDMS from source on both nodes (~15 min — this is the slow step)
 - Start the aggregator, then the sampler once the aggregator answers
 - Print the metric sets, the CSV files being written, and any plugin errors in the sampler log
+
+**Why the CLI is installed first:** Ubuntu cloud images do not ship the AWS CLI (Amazon Linux does),
+and everything else in this directory is delivered from S3, so `aws` has to exist before the first
+`s3 cp`. Waiting on `cloud-init status --wait` first avoids racing cloud-init for the dpkg lock, and
+also guarantees the hostname from user-data has been applied — the aggregator matches advertising
+nodes on their hostname, so starting before that lands would break discovery.
 
 Expected output from the verification step:
 
@@ -325,6 +332,9 @@ aws ssm send-command --targets "Key=tag:LDMSCluster,Values=ldms-app" \
 
 ### Common Issues
 
+- **`aws: not found`, `exit status 127`** → the AWS CLI is missing on the node. Only step 1 of
+  `start_cluster.sh` can hit this, because it installs the CLI before the first `s3 cp`; every later
+  step runs after it. If you see it elsewhere, that step ran before `start_cluster.sh` completed.
 - **A metric set is missing from `METRIC_SETS`** → check the sampler log for the plugin that failed:
   `grep -iE 'error|fail' /tmp/sampler.log` on the compute node, and confirm the plugin was built with
   `ls ~/ovis/build/lib/ovis-ldms/ | grep -E 'meminfo|vmstat|procstat'`. If `procstat` will not

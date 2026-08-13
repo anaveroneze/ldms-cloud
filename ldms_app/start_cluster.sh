@@ -22,8 +22,17 @@ wait_for_ssm "$COUNT" || exit 1
 echo ""
 
 # Step 1: build OVIS/LDMS on every node (~10-15 min, compiles from source)
+#
+# Ubuntu cloud images do not ship the AWS CLI (Amazon Linux does), so it has to
+# be installed before anything can be pulled from S3. Waiting on cloud-init
+# first avoids racing it for the dpkg lock, and also guarantees the hostname
+# from user-data has been applied - the aggregator matches advertising nodes on
+# their hostname, so starting before that lands would break discovery.
 echo "Step 1: Building OVIS/LDMS on all nodes..."
-CMD="aws s3 cp s3://$BUCKET/$PREFIX/setup_ldms.sh /tmp/setup_ldms.sh --region $REGION"
+CMD="cloud-init status --wait || true"
+CMD="$CMD; export DEBIAN_FRONTEND=noninteractive"
+CMD="$CMD; apt-get update -qq && apt-get install -y -qq awscli"
+CMD="$CMD && aws s3 cp s3://$BUCKET/$PREFIX/setup_ldms.sh /tmp/setup_ldms.sh --region $REGION"
 CMD="$CMD && sudo -u ubuntu bash /tmp/setup_ldms.sh"
 CID=$(ssm_send all "$CMD")
 echo "Command ID: $CID"
